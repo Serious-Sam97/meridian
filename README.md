@@ -18,9 +18,9 @@ atomic Lua script, and the test suite kills real worker processes to prove it.
 
 | Package | Description |
 |---|---|
-| [`@meridian/core`](packages/core) | Queues and workers: priorities, delays, retries with backoff, locks, stalled-job recovery, graceful shutdown, metrics |
+| [`@meridian/core`](packages/core) | Queues and workers: priorities, delays, retries with backoff, cron and interval schedulers, rate limits, tags, locks, stalled-job recovery, graceful shutdown, metrics |
 | [`@meridian/supervisor`](packages/supervisor) | Pools of worker processes per queue, balanced by workload (`simple` / `auto`), with a CLI |
-| [`@meridian/dashboard`](packages/dashboard) | Web UI and JSON API: throughput, queues, failed jobs, supervisors, live events |
+| [`@meridian/dashboard`](packages/dashboard) | Web UI and JSON API: throughput, queues, failed jobs, tag search, schedulers, supervisors, live events |
 
 ## Try it
 
@@ -44,7 +44,13 @@ await emails.add('welcome', { to: 'ada@example.com' }, {
   jobId: 'welcome:ada', // idempotent
   attempts: 5,
   backoff: { type: 'exponential', delay: 1_000, jitter: 0.2 },
+  tags: ['customer:42'],
 });
+
+await emails.upsertScheduler('digest', { pattern: '0 9 * * 1-5', tz: 'Europe/Lisbon' }, {
+  name: 'digest',
+});
+await emails.setRateLimit({ max: 600, duration: 60_000 }); // shared by every worker
 ```
 
 ```ts
@@ -124,7 +130,7 @@ loop in which all concurrency slots shared one fetch round trip. The fix is in
 ## Testing
 
 ```bash
-npm run check   # lint + typecheck + 115 tests against a real Redis
+npm run check   # lint + typecheck + 141 tests against a real Redis
 ```
 
 There are no Redis mocks: the Lua scripts are the core of the system, so mocking Redis would
@@ -147,6 +153,7 @@ only test the mocks. Some tests worth reading:
 - [0003: At-least-once delivery with token-based locks](docs/adr/0003-delivery-guarantees-and-locks.md)
 - [0004: Supervisor: process pools balanced by workload](docs/adr/0004-supervisor-and-balancing.md)
 - [0005: Dashboard: a framework-free handler with SSE and no build step](docs/adr/0005-dashboard.md)
+- [0006: Job schedulers: each run schedules the next](docs/adr/0006-job-schedulers.md)
 
 ## Development
 

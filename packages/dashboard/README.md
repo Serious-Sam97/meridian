@@ -1,8 +1,8 @@
 # @meridian/dashboard
 
 A web dashboard for Meridian. It shows throughput, queue depth and runtimes, lets you
-browse jobs and inspect or retry failures, and lists live supervisors and a live event
-feed.
+browse jobs (by state or by tag) and inspect or retry failures, and lists schedulers, rate
+limits, live supervisors and a live event feed.
 
 ```bash
 npm install @meridian/dashboard
@@ -60,6 +60,10 @@ The UI uses a JSON API that you can also call directly:
 | GET | `/api/queues/:name` | One queue's summary |
 | GET | `/api/queues/:name/metrics` | One queue's per-minute metrics |
 | GET | `/api/queues/:name/jobs?state=failed&page=0&size=20` | Jobs by state |
+| GET | `/api/queues/:name/jobs?tag=customer:42` | Jobs by tag |
+| GET | `/api/schedulers` | Schedulers of all queues, soonest first |
+| DELETE | `/api/queues/:name/schedulers/:id` | Remove a scheduler |
+| PUT / DELETE | `/api/queues/:name/rate-limit` | Set (`{ "max": 10, "duration": 1000 }`) or clear the rate limit |
 | GET | `/api/queues/:name/jobs/:id` | A job with its state |
 | POST | `/api/queues/:name/jobs/:id/retry` | Retry a failed job |
 | DELETE | `/api/queues/:name/jobs/:id` | Delete a job |

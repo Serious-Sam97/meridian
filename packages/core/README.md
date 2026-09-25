@@ -25,6 +25,7 @@ await queue.add('welcome', { to: 'ada@example.com' }, {
   backoff: { type: 'exponential', delay: 1_000, jitter: 0.2 },
   removeOnComplete: 1_000,     // keep the newest 1,000 completed jobs
   removeOnFail: false,         // keep failed jobs for inspection
+  tags: ['customer:42'],       // find it later with getJobsByTag
 });
 
 await queue.addBulk([{ name: 'welcome', data: { to: 'grace@example.com' } }]);
@@ -40,8 +41,40 @@ await queue.addBulk([{ name: 'welcome', data: { to: 'grace@example.com' } }]);
 | `retryJob(id)` / `retryAllFailed()` | Move failed jobs back to the queue with fresh attempts |
 | `removeJob(id)` | Delete a job that is not running |
 | `pause()` / `resume()` / `isPaused()` | Stop and restart handing out jobs |
+| `upsertScheduler(id, schedule, template)` | Add a job on a schedule (see below) |
+| `removeScheduler(id)` / `getSchedulers()` | Manage schedulers |
+| `setRateLimit({ max, duration })` / `getRateLimit()` | Limit how many jobs start per window, across all workers |
+| `getJobsByTag(tag)` / `countJobsByTag(tag)` | Find jobs by tag |
 | `Queue.discover(client, prefix?)` | Names of all queues |
 | `obliterate()` | Delete every key of the queue (tests, local development) |
+
+## Repeatable jobs
+
+```ts
+// Every 5 minutes (aligned to the clock)
+await queue.upsertScheduler('sync-inventory', { every: 5 * 60_000 }, { name: 'sync' });
+
+// Weekdays at 9:00 in São Paulo, with a job template
+await queue.upsertScheduler(
+  'morning-report',
+  { pattern: '0 9 * * 1-5', tz: 'America/Sao_Paulo' },
+  { name: 'report', data: { team: 'growth' }, options: { attempts: 3, tags: ['reports'] } },
+);
+```
+
+Upserting is idempotent, so it can run on every deploy. Each run schedules the next, and a
+compare-and-set makes sure exactly one worker does it, however many are running. Runs missed
+while no worker was consuming the queue are skipped, like cron
+([ADR 0006](../../docs/adr/0006-job-schedulers.md)).
+
+## Rate limiting
+
+```ts
+await queue.setRateLimit({ max: 600, duration: 60_000 }); // the email provider's limit
+```
+
+The limit is stored in Redis, so it is shared by every worker and applies to running workers
+immediately. It is a fixed window: at most `max` jobs *start* per window.
 
 ## Worker
 

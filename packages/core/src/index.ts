@@ -1,5 +1,6 @@
+export { computeBackoff } from './backoff.js';
 export type { ConnectionOptions } from './connection.js';
-export { LockLostError } from './errors.js';
+export { LockLostError, UnrecoverableError } from './errors.js';
 export { Job } from './job.js';
 export { type QueueKeys, queueKeys } from './keys.js';
 export { Queue, type QueueOptions } from './queue.js';

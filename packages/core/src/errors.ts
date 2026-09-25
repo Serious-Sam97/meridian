@@ -9,3 +9,11 @@ export class LockLostError extends Error {
     super(`Lost the lock for job ${jobId}; the result of this attempt was discarded`);
   }
 }
+
+/**
+ * Throw from a processor to fail the job immediately, without using the
+ * remaining attempts. For errors a retry cannot fix, such as invalid input.
+ */
+export class UnrecoverableError extends Error {
+  override readonly name = 'UnrecoverableError';
+}

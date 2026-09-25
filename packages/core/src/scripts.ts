@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { Redis } from 'ioredis';
 
-export type ScriptName = 'addJob' | 'extendLocks' | 'moveToActive' | 'moveToFinished';
+export type ScriptName = 'addJob' | 'extendLocks' | 'moveToActive' | 'moveToFinished' | 'retryJob';
 
 interface LoadedScript {
   source: string;

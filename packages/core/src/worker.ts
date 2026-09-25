@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Redis } from 'ioredis';
+import { computeBackoff } from './backoff.js';
 import { type ConnectionOptions, createConnection, duplicateConnection } from './connection.js';
-import { LockLostError } from './errors.js';
+import { LockLostError, UnrecoverableError } from './errors.js';
 import { Job } from './job.js';
 import { type QueueKeys, queueKeys } from './keys.js';
 import { runScript } from './scripts.js';
@@ -41,6 +42,9 @@ export interface WorkerOptions {
 export interface WorkerEvents<Data, Result> {
   active: [job: Job<Data, Result>];
   completed: [job: Job<Data, Result>, result: Result];
+  /** The attempt failed and the job will run again after `delay` ms. */
+  retrying: [job: Job<Data, Result>, error: Error, delay: number];
+  /** The job failed for good: no attempts left, or an UnrecoverableError. */
   failed: [job: Job<Data, Result>, error: Error];
   error: [error: Error];
 }
@@ -190,6 +194,12 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         await this.finish(job, token, 'completed', value, '', job.opts.removeOnComplete);
         job.returnValue = outcome.result;
         this.emit('completed', job, outcome.result);
+      } else if (this.shouldRetry(job, outcome.error)) {
+        const { error } = outcome;
+        const backoff = computeBackoff(job.opts.backoff, job.attemptsMade + 1);
+        await this.retry(job, token, backoff, error);
+        job.failedReason = error.message;
+        this.emit('retrying', job, error, backoff);
       } else {
         const { error } = outcome;
         await this.finish(
@@ -235,6 +245,34 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         retention(removeOption),
         this.maxEvents,
       ],
+    );
+    if (code !== 0) throw new LockLostError(job.id);
+    job.attemptsMade += 1;
+  }
+
+  private shouldRetry(job: Job<Data, Result>, error: Error): boolean {
+    if (error instanceof UnrecoverableError) return false;
+    return job.attemptsMade + 1 < (job.opts.attempts ?? 1);
+  }
+
+  private async retry(
+    job: Job<Data, Result>,
+    token: string,
+    backoff: number,
+    error: Error,
+  ): Promise<void> {
+    const code = await runScript<number>(
+      this.client,
+      'retryJob',
+      [
+        this.keys.active,
+        this.keys.wait,
+        this.keys.delayed,
+        this.keys.marker,
+        this.keys.events,
+        this.keys.jobPrefix,
+      ],
+      [job.id, token, backoff, error.message, error.stack ?? '', this.maxEvents],
     );
     if (code !== 0) throw new LockLostError(job.id);
     job.attemptsMade += 1;

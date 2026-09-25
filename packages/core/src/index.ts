@@ -1,1 +1,5 @@
-export const VERSION = '0.1.0';
+export type { ConnectionOptions } from './connection.js';
+export { Job } from './job.js';
+export { type QueueKeys, queueKeys } from './keys.js';
+export { Queue, type QueueOptions } from './queue.js';
+export * from './types.js';

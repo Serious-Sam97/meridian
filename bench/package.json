@@ -5,11 +5,13 @@
   "description": "Throughput and latency benchmarks: Meridian vs BullMQ",
   "scripts": {
     "bench": "node --import tsx --conditions=@meridian/source run.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "soak": "node --import tsx --conditions=@meridian/source soak.ts"
   },
   "dependencies": {
     "@meridian/core": "0.3.0",
     "bullmq": "^6.3.8",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.0.0",
+    "@meridian/supervisor": "0.3.0"
   }
 }

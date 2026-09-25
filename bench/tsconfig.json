@@ -4,5 +4,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["run.ts"]
+  "include": ["run.ts", "soak.ts", "soak"]
 }

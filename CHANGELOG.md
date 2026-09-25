@@ -27,6 +27,8 @@ All packages are versioned together. The format follows
 
 ### Fixed
 
+- Workers leaked about 360 bytes per job: every wait raced a promise that stayed pending
+  until `close()`. Found by the soak test; heap after GC is now flat
 - `worker.close()` could hang forever after the blocking connection had been dropped
 
 ### Testing

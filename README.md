@@ -157,6 +157,11 @@ only test the mocks. Some tests worth reading:
   once
 - [Redis Cluster](packages/core/test/cluster/cluster.test.ts): queues deliberately placed on
   different nodes
+- [soak test](bench/soak.ts): an hour at 200 jobs/s. The first run showed worker memory
+  climbing about 64 MB per process per hour. Heap measured after a forced GC confirmed a
+  leak of about 360 bytes per job, which is now fixed and covered by a
+  [regression test](packages/core/test/memory.test.ts). Results are in
+  [bench/soak-results.md](bench/soak-results.md).
 
 ## Architecture decisions
 

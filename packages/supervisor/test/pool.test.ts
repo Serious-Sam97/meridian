@@ -137,6 +137,56 @@ describe('ProcessPool', { timeout: 30_000 }, () => {
     expect(isAlive(pid ?? -1)).toBe(false);
   });
 
+  describe('recycling', () => {
+    it('replaces a process after maxJobs without counting it as a crash', async () => {
+      createPool({ concurrency: 1, recycle: { maxJobs: 2 } });
+      const recycled: string[] = [];
+      const crashes: number[] = [];
+      pool.on('recycle', (_pid, reason) => recycled.push(reason));
+      pool.on('crash', (pid) => crashes.push(pid));
+      await pool.scale(1);
+
+      const jobs = await Promise.all([1, 2, 3, 4, 5].map((n) => queue.add('double', { n })));
+      await waitFor(async () => (await queue.getJobCounts()).completed === 5, { timeout: 20_000 });
+
+      const pids = new Set(
+        await Promise.all(
+          jobs.map(async (j) => (await queue.getJob<{ pid: number }>(j.id))?.returnValue?.pid),
+        ),
+      );
+      // 5 jobs at 2 per process: at least three different processes.
+      expect(pids.size).toBeGreaterThanOrEqual(3);
+      expect(recycled[0]).toBe('handled 2 jobs');
+      expect(crashes).toEqual([]);
+      await waitFor(() => pool.size === 1);
+    });
+
+    it('replaces a process that exceeds maxMemory', async () => {
+      // Any Node process is above 1 MB, so the first job triggers it.
+      createPool({ concurrency: 1, recycle: { maxMemory: 1 } });
+      const recycled: string[] = [];
+      pool.on('recycle', (_pid, reason) => recycled.push(reason));
+      await pool.scale(1);
+
+      await queue.add('double', { n: 1 });
+      await waitFor(() => recycled.length === 1);
+      expect(recycled[0]).toMatch(/^memory \d+ MB > 1 MB$/);
+      await waitFor(() => pool.size === 1);
+    });
+
+    it('replaces a process after maxTime', async () => {
+      createPool({ recycle: { maxTime: 800 } });
+      const recycled: number[] = [];
+      pool.on('recycle', (pid) => recycled.push(pid));
+      await pool.scale(1);
+      const [first] = pool.pids;
+
+      await waitFor(() => recycled.length >= 1, { timeout: 10_000 });
+      expect(recycled[0]).toBe(first);
+      await waitFor(() => pool.size === 1 && pool.pids[0] !== first);
+    });
+  });
+
   it('stop() ends every process and does not restart them', async () => {
     createPool();
     await pool.scale(3);

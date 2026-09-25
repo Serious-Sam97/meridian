@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { Queue } from '@meridian/core';
 import { Redis, type RedisOptions } from 'ioredis';
 import { type Allocation, type BalanceStrategy, balance, type QueueLoad } from './balancer.js';
-import type { ChildConfig } from './child-config.js';
+import type { ChildConfig, RecycleOptions } from './child-config.js';
 import { ProcessPool } from './pool.js';
 
 type ChildWorkerOptions = ChildConfig['workerOptions'];
@@ -15,6 +15,8 @@ export interface SupervisedQueue {
   /** Jobs each process runs at once. Defaults to 1. */
   concurrency?: number;
   workerOptions?: ChildWorkerOptions;
+  /** Recycle limits for this queue's processes, overriding the supervisor's. */
+  recycle?: RecycleOptions;
 }
 
 export interface SupervisorOptions {
@@ -38,6 +40,8 @@ export interface SupervisorOptions {
   metricsWindow?: number;
   /** How long a stopping process waits for its jobs, in ms. Defaults to 10s. */
   shutdownTimeout?: number;
+  /** Replace worker processes that cross these limits (Horizon's memory/maxJobs). */
+  recycle?: RecycleOptions;
   /** Worker options applied to every queue, overridden per queue. */
   workerOptions?: ChildWorkerOptions;
   /** Extra Node flags for worker processes. */
@@ -58,6 +62,7 @@ export interface SupervisorStatus {
 export interface SupervisorEvents {
   scaled: [allocation: Allocation];
   crash: [queue: string, pid: number, restartIn: number];
+  recycle: [queue: string, pid: number, reason: string];
   error: [error: Error];
 }
 
@@ -124,12 +129,14 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
           concurrency: config.concurrency ?? 1,
           shutdownTimeout: options.shutdownTimeout ?? 10_000,
           workerOptions: { ...options.workerOptions, ...config.workerOptions },
+          recycle: { ...options.recycle, ...config.recycle },
         },
         execArgv: options.execArgv,
       });
       pool.on('crash', (pid, _code, _signal, restartIn) =>
         this.emit('crash', queue, pid, restartIn),
       );
+      pool.on('recycle', (pid, reason) => this.emit('recycle', queue, pid, reason));
       this.pools.set(queue, pool);
     }
   }

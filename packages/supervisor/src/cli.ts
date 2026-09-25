@@ -43,6 +43,9 @@ async function main(): Promise<void> {
     supervisor.on('crash', (queue, pid, restartIn) =>
       log(`[${supervisor.name}] worker ${pid} for ${queue} crashed, restarting in ${restartIn}ms`),
     );
+    supervisor.on('recycle', (queue, pid, reason) =>
+      log(`[${supervisor.name}] recycled worker ${pid} for ${queue}: ${reason}`),
+    );
     supervisor.on('error', (err) => log(`[${supervisor.name}] error: ${err.stack ?? err.message}`));
   }
 

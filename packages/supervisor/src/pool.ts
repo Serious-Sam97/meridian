@@ -25,12 +25,16 @@ export interface PoolEvents {
   exit: [pid: number, code: number | null, signal: NodeJS.Signals | null];
   /** A child exited without being asked to; it will be replaced after `restartIn` ms. */
   crash: [pid: number, code: number | null, signal: NodeJS.Signals | null, restartIn: number];
+  /** A child crossed a recycle limit and was replaced (not a crash). */
+  recycle: [pid: number, reason: string];
 }
 
 interface ManagedChild {
   process: ChildProcess;
   startedAt: number;
   stopping: boolean;
+  /** Set when the child announced a planned exit after crossing a recycle limit. */
+  recycling?: string;
   exited: Promise<void>;
 }
 
@@ -135,11 +139,23 @@ export class ProcessPool extends EventEmitter<PoolEvents> {
     this.children.add(managed);
     if (child.pid) this.emit('spawn', child.pid);
 
+    child.on('message', (message: { type?: string; reason?: string }) => {
+      if (message?.type === 'recycle') managed.recycling = message.reason ?? 'recycled';
+    });
+
     child.once('exit', (code, signal) => {
       this.children.delete(managed);
       const pid = child.pid ?? -1;
       this.emit('exit', pid, code, signal);
-      if (!managed.stopping && !this.stopped) this.onCrash(managed, pid, code, signal);
+      if (managed.stopping || this.stopped) return;
+      if (managed.recycling !== undefined && code === 0) {
+        // Planned: replace it right away, without crash backoff. The
+        // replacement starts only now, so maxProcesses is never exceeded.
+        this.emit('recycle', pid, managed.recycling);
+        void this.reconcile();
+        return;
+      }
+      this.onCrash(managed, pid, code, signal);
     });
   }
 

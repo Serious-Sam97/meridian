@@ -30,9 +30,37 @@ async function main(): Promise<void> {
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    clearInterval(memoryTimer);
+    clearTimeout(lifetimeTimer);
     await worker.close({ timeout: config.shutdownTimeout });
     process.exit(0);
   };
+
+  // Recycling: tell the pool this exit is planned, then drain and exit.
+  const { maxMemory, maxJobs, maxTime } = config.recycle ?? {};
+  const recycle = (reason: string) => {
+    if (stopping) return;
+    process.send?.({ type: 'recycle', reason });
+    void stop();
+  };
+  const checkMemory = () => {
+    const mb = process.memoryUsage().rss / 1024 / 1024;
+    if (maxMemory && mb > maxMemory) recycle(`memory ${Math.round(mb)} MB > ${maxMemory} MB`);
+  };
+  let handled = 0;
+  const afterJob = () => {
+    handled++;
+    if (maxJobs && handled >= maxJobs) recycle(`handled ${handled} jobs`);
+    else checkMemory();
+  };
+  worker.on('completed', afterJob);
+  worker.on('failed', afterJob);
+  worker.on('retrying', afterJob);
+  // Memory can also grow while a long job runs, so check on a timer too.
+  const memoryTimer = maxMemory ? setInterval(checkMemory, 5_000) : undefined;
+  const lifetimeTimer = maxTime
+    ? setTimeout(() => recycle(`lived ${maxTime} ms`), maxTime)
+    : undefined;
 
   process.on('message', (message: { type?: string }) => {
     if (message?.type === 'shutdown') void stop();

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Redis, type RedisOptions } from 'ioredis';
 import { createApi } from './api.js';
@@ -22,6 +23,54 @@ export interface Dashboard {
 }
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+const UI_DIR = new URL('../ui/', import.meta.url);
+const ASSETS: Record<string, { file: string; type: string }> = {
+  '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
+  '/index.html': { file: 'index.html', type: 'text/html; charset=utf-8' },
+  '/assets/app.js': { file: 'app.js', type: 'text/javascript; charset=utf-8' },
+  '/assets/app.css': { file: 'app.css', type: 'text/css; charset=utf-8' },
+};
+
+const SECURITY_HEADERS = {
+  // Everything is served from the dashboard itself; no inline scripts.
+  'content-security-policy':
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+};
+
+const assetCache = new Map<string, Buffer>();
+
+function serveAsset(req: IncomingMessage, res: ServerResponse, pathname: string): boolean {
+  const asset = ASSETS[pathname];
+  if (!asset || (req.method !== 'GET' && req.method !== 'HEAD')) return false;
+
+  // Mounted under a path (app.use('/queues', handler)) and opened without a
+  // trailing slash: relative asset and API URLs would resolve one level too high.
+  const original = (req as IncomingMessage & { originalUrl?: string }).originalUrl;
+  if (pathname === '/' && original) {
+    const [path, query] = original.split('?');
+    if (path && !path.endsWith('/')) {
+      res.writeHead(301, { location: `${path}/${query ? `?${query}` : ''}` });
+      res.end();
+      return true;
+    }
+  }
+
+  let body = assetCache.get(asset.file);
+  if (!body) {
+    body = readFileSync(new URL(asset.file, UI_DIR));
+    assetCache.set(asset.file, body);
+  }
+  res.writeHead(200, {
+    'content-type': asset.type,
+    'cache-control': 'no-cache',
+    ...SECURITY_HEADERS,
+  });
+  res.end(req.method === 'HEAD' ? undefined : body);
+  return true;
+}
 
 export function createDashboard(options: DashboardOptions = {}): Dashboard {
   const prefix = options.prefix ?? 'meridian';
@@ -53,6 +102,7 @@ export function createDashboard(options: DashboardOptions = {}): Dashboard {
     }
 
     if (await api.handle(req, res, url)) return;
+    if (serveAsset(req, res, url.pathname)) return;
 
     if (next) next();
     else sendJson(res, 404, { error: 'Not found' });

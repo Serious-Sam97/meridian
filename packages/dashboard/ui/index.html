@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meridian</title>
+    <link rel="stylesheet" href="assets/app.css" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%234f46e5'/%3E%3Cpath d='M16 4v24M4 16h24' stroke='white' stroke-width='2'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <h1>Meridian</h1>
+      </div>
+      <div class="live" id="live" title="Live updates">
+        <span class="dot"></span><span id="live-label">connecting…</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="stats" id="stats" aria-label="Totals"></section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Throughput</h2>
+          <span class="muted">jobs finished per minute, last 60 minutes</span>
+        </div>
+        <div class="chart" id="chart" role="img" aria-label="Throughput chart"></div>
+        <div class="legend">
+          <span><i class="swatch ok"></i>completed</span>
+          <span><i class="swatch bad"></i>failed</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Queues</h2></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Queue</th>
+                <th class="num">Waiting</th>
+                <th class="num">Active</th>
+                <th class="num">Delayed</th>
+                <th class="num">Failed</th>
+                <th class="num">Jobs/min</th>
+                <th class="num">Runtime</th>
+                <th class="num">Wait</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="queues"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="queues-empty" hidden>No queues yet. Add a job and it will show up here.</p>
+      </section>
+
+      <div class="columns">
+        <section class="card">
+          <div class="card-head">
+            <h2>Jobs</h2>
+            <select id="job-queue" aria-label="Queue"></select>
+          </div>
+          <nav class="tabs" id="job-tabs" aria-label="Job state"></nav>
+          <div class="job-actions">
+            <button type="button" id="retry-all" class="secondary" hidden>Retry all failed</button>
+          </div>
+          <ul class="jobs" id="jobs"></ul>
+          <div class="pager">
+            <button type="button" id="prev" class="secondary">Previous</button>
+            <span id="page-label" class="muted"></span>
+            <button type="button" id="next" class="secondary">Next</button>
+          </div>
+        </section>
+
+        <div class="stack">
+          <section class="card">
+            <div class="card-head"><h2>Supervisors</h2></div>
+            <div id="supervisors"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Live events</h2></div>
+            <ol class="feed" id="feed"></ol>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <dialog id="job-dialog">
+      <div class="dialog-head">
+        <h2 id="job-title">Job</h2>
+        <button type="button" id="close-dialog" class="icon" aria-label="Close">✕</button>
+      </div>
+      <dl class="meta" id="job-meta"></dl>
+      <div id="job-sections"></div>
+      <div class="dialog-actions" id="job-actions"></div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" hidden></div>
+    <script type="module" src="assets/app.js"></script>
+  </body>
+</html>

@@ -20,7 +20,8 @@
     "check": "npm run lint && npm run typecheck && npm test",
     "redis:up": "docker compose up -d redis",
     "redis:down": "docker compose down",
-    "bench": "npm run bench -w @meridian/bench --"
+    "bench": "npm run bench -w @meridian/bench --",
+    "demo": "npm run build && node examples/demo/start.js"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

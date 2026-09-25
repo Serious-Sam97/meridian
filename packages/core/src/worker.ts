@@ -227,10 +227,14 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private async waitForWork(timeoutMs: number): Promise<void> {
     // BLPOP treats 0 as "forever" and has 10ms resolution.
     const seconds = Math.max(timeoutMs, 10) / 1000;
+    const blpop = this.blockingClient.blpop(this.keys.marker, seconds);
+    // close() disconnects the blocking client, but if the connection was
+    // dropped and ioredis is between reconnect attempts, the queued BLPOP is
+    // never rejected. Racing the stop signal keeps close() from hanging.
+    blpop.catch(() => {});
     try {
-      await this.blockingClient.blpop(this.keys.marker, seconds);
+      await Promise.race([blpop, this.stopRequested.promise]);
     } catch (err) {
-      // close() disconnects the blocking client to interrupt BLPOP.
       if (!this.closing) {
         this.reportError(err);
         await delay(1_000);

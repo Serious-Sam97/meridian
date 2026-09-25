@@ -11,6 +11,18 @@ export class LockLostError extends Error {
 }
 
 /**
+ * Passed as the abort reason when close() times out: the job is handed back
+ * to the queue for another worker and this attempt's result is discarded.
+ */
+export class WorkerClosingError extends Error {
+  override readonly name = 'WorkerClosingError';
+
+  constructor() {
+    super('Worker is shutting down; the job was released back to the queue');
+  }
+}
+
+/**
  * Throw from a processor to fail the job immediately, without using the
  * remaining attempts. For errors a retry cannot fix, such as invalid input.
  */

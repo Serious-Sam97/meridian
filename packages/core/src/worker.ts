@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { Redis } from 'ioredis';
 import { computeBackoff } from './backoff.js';
 import { type ConnectionOptions, createConnection, duplicateConnection } from './connection.js';
-import { LockLostError, UnrecoverableError } from './errors.js';
+import { LockLostError, UnrecoverableError, WorkerClosingError } from './errors.js';
 import { Job } from './job.js';
 import { type QueueKeys, queueKeys } from './keys.js';
 import { runScript } from './scripts.js';
@@ -46,6 +46,15 @@ export interface WorkerOptions {
   autorun?: boolean;
 }
 
+export interface CloseOptions {
+  /**
+   * How long to wait for running jobs, in ms. After that their processors are
+   * aborted with a WorkerClosingError and the jobs go back to the queue.
+   * Waits indefinitely when omitted.
+   */
+  timeout?: number;
+}
+
 export interface WorkerEvents<Data, Result> {
   active: [job: Job<Data, Result>];
   completed: [job: Job<Data, Result>, result: Result];
@@ -77,6 +86,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private lockTimer?: NodeJS.Timeout;
   private stalledTimer?: NodeJS.Timeout;
   private closing?: Promise<void>;
+  /** Resolved by close() so a loop waiting for a free slot wakes up. */
+  private readonly stopRequested = Promise.withResolvers<void>();
 
   constructor(
     readonly queueName: string,
@@ -116,15 +127,15 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   }
 
   /** Stops fetching new jobs and waits for the ones in progress to finish. */
-  close(): Promise<void> {
-    this.closing ??= this.shutdown();
+  close(options: CloseOptions = {}): Promise<void> {
+    this.closing ??= this.shutdown(options.timeout);
     return this.closing;
   }
 
   private async loop(): Promise<void> {
     while (!this.closing) {
       if (this.active.size >= this.concurrency) {
-        await Promise.race(this.activeTasks());
+        await Promise.race([...this.activeTasks(), this.stopRequested.promise]);
         continue;
       }
 
@@ -205,7 +216,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
       outcome = { ok: false, error: toError(err) };
     }
 
-    // Another worker may already own the job; the loss was reported by extendLocks.
+    // Aborted means the job is no longer ours: the lock was lost (another
+    // worker may own it now) or close() timed out and released it.
     if (signal.aborted) return;
     const entry = this.active.get(job.id);
     if (entry) entry.finishing = true;
@@ -349,14 +361,56 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     }
   }
 
+  /** Aborts the jobs still running and hands them back to the queue. */
+  private async releaseActive(): Promise<void> {
+    const releases = [...this.active].map(async ([id, entry]) => {
+      if (entry.finishing || entry.controller.signal.aborted) return;
+      entry.controller.abort(new WorkerClosingError());
+      try {
+        await runScript<number>(
+          this.client,
+          'releaseJob',
+          [
+            this.keys.active,
+            this.keys.wait,
+            this.keys.marker,
+            this.keys.events,
+            this.keys.jobPrefix,
+          ],
+          [id, entry.token, this.maxEvents],
+        );
+      } catch (err) {
+        // The stalled checker recovers the job once its lock expires.
+        this.reportError(err);
+      }
+    });
+    await Promise.all(releases);
+    // Let processors that honour the signal settle before the connection closes.
+    await Promise.race([Promise.allSettled(this.activeTasks()), delay(100)]);
+  }
+
   private activeTasks(): Promise<void>[] {
     return [...this.active.values()].map((entry) => entry.task);
   }
 
-  private async shutdown(): Promise<void> {
+  private async shutdown(timeout: number | undefined): Promise<void> {
+    this.stopRequested.resolve();
     this.blockingClient.disconnect();
     await this.running;
-    await Promise.allSettled(this.activeTasks());
+
+    const drained = Promise.allSettled(this.activeTasks());
+    if (timeout === undefined) {
+      await drained;
+    } else {
+      let timer: NodeJS.Timeout | undefined;
+      const expired = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), timeout);
+      });
+      const timedOut = await Promise.race([drained.then(() => false), expired]);
+      clearTimeout(timer);
+      if (timedOut) await this.releaseActive();
+    }
+
     clearInterval(this.lockTimer);
     clearInterval(this.stalledTimer);
     if (this.ownsClient) await this.client.quit();

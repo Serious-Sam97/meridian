@@ -20,7 +20,6 @@ export type Processor<Data, Result> = (
 interface ActiveJob {
   token: string;
   controller: AbortController;
-  task: Promise<void>;
   /** Set once the result is being written, when the lock is released on purpose. */
   finishing: boolean;
 }
@@ -82,6 +81,12 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private readonly maxEvents: number;
 
   private readonly active = new Map<string, ActiveJob>();
+  /**
+   * One promise per concurrency slot. A slot processes a job, then fetches
+   * its own next one, so slots fetch in parallel instead of queueing behind
+   * a single fetch loop.
+   */
+  private readonly slots = new Set<Promise<void>>();
   private running?: Promise<void>;
   private lockTimer?: NodeJS.Timeout;
   private stalledTimer?: NodeJS.Timeout;
@@ -134,8 +139,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
 
   private async loop(): Promise<void> {
     while (!this.closing) {
-      if (this.active.size >= this.concurrency) {
-        await Promise.race([...this.activeTasks(), this.stopRequested.promise]);
+      if (this.slots.size >= this.concurrency) {
+        await Promise.race([...this.slots, this.stopRequested.promise]);
         continue;
       }
 
@@ -154,12 +159,33 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         continue;
       }
 
-      const { job, token } = fetched;
+      const slot: Promise<void> = this.runSlot(fetched).finally(() => this.slots.delete(slot));
+      this.slots.add(slot);
+    }
+  }
+
+  /** Processes jobs back to back until the queue has none ready, then frees the slot. */
+  private async runSlot(first: { job: Job<Data, Result>; token: string }): Promise<void> {
+    let current: { job: Job<Data, Result>; token: string } | undefined = first;
+    while (current) {
+      const { job, token } = current;
       const controller = new AbortController();
-      const task = this.process(job, token, controller.signal).finally(() =>
-        this.active.delete(job.id),
-      );
-      this.active.set(job.id, { token, controller, task, finishing: false });
+      this.active.set(job.id, { token, controller, finishing: false });
+      try {
+        await this.process(job, token, controller.signal);
+      } finally {
+        this.active.delete(job.id);
+      }
+
+      current = undefined;
+      if (this.closing) return;
+      try {
+        const next = await this.fetchNext();
+        if ('job' in next) current = next;
+      } catch (err) {
+        // The main loop keeps retrying fetches with a delay.
+        if (!this.closing) this.reportError(err);
+      }
     }
   }
 
@@ -387,11 +413,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     });
     await Promise.all(releases);
     // Let processors that honour the signal settle before the connection closes.
-    await Promise.race([Promise.allSettled(this.activeTasks()), delay(100)]);
-  }
-
-  private activeTasks(): Promise<void>[] {
-    return [...this.active.values()].map((entry) => entry.task);
+    await Promise.race([Promise.allSettled([...this.slots]), delay(100)]);
   }
 
   private async shutdown(timeout: number | undefined): Promise<void> {
@@ -399,7 +421,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     this.blockingClient.disconnect();
     await this.running;
 
-    const drained = Promise.allSettled(this.activeTasks());
+    const drained = Promise.allSettled([...this.slots]);
     if (timeout === undefined) {
       await drained;
     } else {

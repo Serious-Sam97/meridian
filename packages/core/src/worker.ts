@@ -302,6 +302,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         this.keys.events,
         this.keys.jobPrefix,
         this.keys.metricsPrefix,
+        this.keys.tagPrefix,
       ],
       [
         job.id,

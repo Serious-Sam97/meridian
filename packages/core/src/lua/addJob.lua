@@ -8,6 +8,7 @@
   KEYS[4] marker
   KEYS[5] events
   KEYS[6] job key prefix
+  KEYS[7] tag key prefix
 
   ARGV[1] custom job id, or '' to generate one
   ARGV[2] job name
@@ -24,7 +25,7 @@
 
 local keys = {
   id = KEYS[1], wait = KEYS[2], delayed = KEYS[3],
-  marker = KEYS[4], events = KEYS[5], jobPrefix = KEYS[6],
+  marker = KEYS[4], events = KEYS[5], jobPrefix = KEYS[6], tagPrefix = KEYS[7],
 }
 local jobId, created = createJob(keys, ARGV[1], ARGV[2], ARGV[3], ARGV[4],
   tonumber(ARGV[5]), tonumber(ARGV[6]), ARGV[7], nowMs())

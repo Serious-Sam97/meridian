@@ -7,6 +7,7 @@
   KEYS[3] events
   KEYS[4] job key prefix
   KEYS[5] metrics key prefix
+  KEYS[6] tag key prefix
 
   ARGV[1] job id
   ARGV[2] lock token
@@ -21,6 +22,7 @@
   -2 when the job is not active.
 ]]
 --@include common
+--@include tags
 local now = nowMs()
 
 local jobId = ARGV[1]
@@ -48,7 +50,7 @@ redis.call('EXPIRE', bucketKey, 86400)
 
 local keep = tonumber(ARGV[7])
 if keep == 0 then
-  redis.call('DEL', jobKey)
+  deleteJob(KEYS[4], KEYS[6], jobId)
 else
   redis.call('HINCRBY', jobKey, 'attemptsMade', 1)
   redis.call('HSET', jobKey, ARGV[4], ARGV[5], 'finishedOn', now)
@@ -62,7 +64,7 @@ else
     if excess > 0 then
       local old = redis.call('ZRANGE', KEYS[2], 0, excess - 1)
       for _, id in ipairs(old) do
-        redis.call('DEL', KEYS[4] .. id)
+        deleteJob(KEYS[4], KEYS[6], id)
       end
       redis.call('ZREMRANGEBYRANK', KEYS[2], 0, excess - 1)
     end

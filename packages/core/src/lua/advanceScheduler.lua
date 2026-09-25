@@ -32,7 +32,7 @@ local opts = cjson.decode(template[3])
 opts['repeat'] = { scheduler = id, runAt = nextRun }
 local keys = {
   id = KEYS[3], wait = KEYS[4], delayed = KEYS[5],
-  marker = KEYS[6], events = KEYS[7], jobPrefix = KEYS[8],
+  marker = KEYS[6], events = KEYS[7], jobPrefix = KEYS[8], tagPrefix = KEYS[9],
 }
 createJob(keys, 'repeat:' .. id .. ':' .. nextRun, template[1], template[2], cjson.encode(opts),
   opts.priority or 0, math.max(nextRun - now, 0), ARGV[4], now)

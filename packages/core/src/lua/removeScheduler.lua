@@ -6,11 +6,14 @@
   KEYS[2] scheduler hash
   KEYS[3] delayed
   KEYS[4] job key prefix
+  KEYS[5] tag key prefix
 
   ARGV[1] scheduler id
 
   Returns 1 when removed, 0 when there was no such scheduler.
 ]]
+--@include tags
+
 local id = ARGV[1]
 local nextRun = redis.call('HGET', KEYS[2], 'next')
 if not nextRun then
@@ -19,7 +22,7 @@ end
 
 local jobId = 'repeat:' .. id .. ':' .. nextRun
 if redis.call('ZREM', KEYS[3], jobId) == 1 then
-  redis.call('DEL', KEYS[4] .. jobId)
+  deleteJob(KEYS[4], KEYS[5], jobId)
 end
 
 redis.call('DEL', KEYS[2])

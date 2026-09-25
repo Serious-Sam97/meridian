@@ -76,6 +76,7 @@ export class Queue<Data = unknown> {
         this.keys.marker,
         this.keys.events,
         this.keys.jobPrefix,
+        this.keys.tagPrefix,
       ],
       [
         opts.jobId ?? '',
@@ -128,6 +129,8 @@ export class Queue<Data = unknown> {
     validateSchedule(schedule);
     const options = { ...this.defaultJobOptions, ...template.options };
     validateOptions(options);
+    // Lua's cjson turns an empty array into {}, so do not store one.
+    if (options.tags?.length === 0) delete options.tags;
 
     const next = nextRun(schedule, await redisNow(this.client));
     await runScript(this.client, 'upsertScheduler', schedulerScriptKeys(this.keys, id), [
@@ -147,7 +150,13 @@ export class Queue<Data = unknown> {
     const removed = await runScript<number>(
       this.client,
       'removeScheduler',
-      [this.keys.schedulers, this.keys.scheduler(id), this.keys.delayed, this.keys.jobPrefix],
+      [
+        this.keys.schedulers,
+        this.keys.scheduler(id),
+        this.keys.delayed,
+        this.keys.jobPrefix,
+        this.keys.tagPrefix,
+      ],
       [id],
     );
     return removed === 1;
@@ -217,8 +226,25 @@ export class Queue<Data = unknown> {
     const ids = newestFirst
       ? await this.client.zrevrange(key, start, end)
       : await this.client.zrange(key, String(start), String(end));
-    if (ids.length === 0) return [];
+    return this.loadJobs<Result>(ids);
+  }
 
+  /** Jobs carrying a tag, newest first. */
+  async getJobsByTag<Result = unknown>(
+    tag: string,
+    start = 0,
+    end = 19,
+  ): Promise<Job<Data, Result>[]> {
+    const ids = await this.client.zrevrange(this.keys.tag(tag), start, end);
+    return this.loadJobs<Result>(ids);
+  }
+
+  async countJobsByTag(tag: string): Promise<number> {
+    return this.client.zcard(this.keys.tag(tag));
+  }
+
+  private async loadJobs<Result>(ids: string[]): Promise<Job<Data, Result>[]> {
+    if (ids.length === 0) return [];
     const pipeline = this.client.pipeline();
     for (const id of ids) pipeline.hgetall(this.keys.job(id));
     const hashes = (await pipeline.exec()) ?? [];
@@ -266,6 +292,7 @@ export class Queue<Data = unknown> {
         this.keys.failed,
         this.keys.events,
         this.keys.jobPrefix,
+        this.keys.tagPrefix,
       ],
       [id, this.maxEvents],
     );
@@ -416,6 +443,8 @@ function parseScheduler<Data>(id: string, hash: Record<string, string>): Schedul
   };
 }
 
+const MAX_TAGS = 20;
+
 function validateOptions(opts: JobOptions): void {
   const priority = opts.priority ?? 0;
   if (!Number.isInteger(priority) || priority < 0 || priority > MAX_PRIORITY) {
@@ -426,6 +455,16 @@ function validateOptions(opts: JobOptions): void {
   }
   if (opts.attempts !== undefined && (!Number.isInteger(opts.attempts) || opts.attempts < 1)) {
     throw new RangeError('attempts must be a positive integer');
+  }
+  if (opts.tags !== undefined) {
+    if (!Array.isArray(opts.tags) || opts.tags.length > MAX_TAGS) {
+      throw new RangeError(`tags must be an array of at most ${MAX_TAGS} strings`);
+    }
+    for (const tag of opts.tags) {
+      if (typeof tag !== 'string' || tag.length === 0 || tag.length > 200) {
+        throw new RangeError('each tag must be a string of 1 to 200 characters');
+      }
+    }
   }
   if (opts.jobId !== undefined && (opts.jobId === '' || opts.jobId.includes(':'))) {
     throw new RangeError('jobId must be non-empty and must not contain ":"');

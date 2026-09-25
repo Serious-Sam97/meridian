@@ -1,9 +1,10 @@
 --@include common
+--@include tags
 
 -- Creates a job and puts it in the wait set, or the delayed set when it has a
 -- delay. Adding is idempotent on a custom id. Returns jobId, created (1 or 0).
 --
--- k holds the queue keys: id, wait, delayed, marker, events, jobPrefix.
+-- k holds the queue keys: id, wait, delayed, marker, events, jobPrefix, tagPrefix.
 local function createJob(k, jobId, name, data, opts, priority, delay, maxEvents, now)
   if jobId ~= '' and redis.call('EXISTS', k.jobPrefix .. jobId) == 1 then
     return jobId, 0
@@ -23,6 +24,7 @@ local function createJob(k, jobId, name, data, opts, priority, delay, maxEvents,
     'seq', seq,
     'timestamp', now,
     'attemptsMade', 0)
+  indexTags(k.tagPrefix, opts, jobId, now)
 
   local event
   if delay > 0 then

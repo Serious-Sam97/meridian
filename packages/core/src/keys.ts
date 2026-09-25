@@ -15,6 +15,9 @@ export interface QueueKeys {
   limiter: string;
   /** Prefix for per-minute metric buckets; the bucket start (ms) is appended. */
   metricsPrefix: string;
+  /** Prefix for tag indexes; the tag is appended. */
+  tagPrefix: string;
+  tag(tag: string): string;
   /** Sorted set of scheduler ids by next run time (ADR 0006). */
   schedulers: string;
   scheduler(id: string): string;
@@ -35,6 +38,7 @@ export function schedulerScriptKeys(keys: QueueKeys, id: string): string[] {
     keys.marker,
     keys.events,
     keys.jobPrefix,
+    keys.tagPrefix,
   ];
 }
 
@@ -65,6 +69,8 @@ export function queueKeys(queue: string, prefix = 'meridian'): QueueKeys {
     stalledCheck: `${base}stalled-check`,
     limiter: `${base}limiter`,
     metricsPrefix: `${base}metrics:`,
+    tagPrefix: `${base}tag:`,
+    tag: (tag) => `${base}tag:${tag}`,
     schedulers: `${base}schedulers`,
     scheduler: (id) => `${base}scheduler:${id}`,
     jobPrefix,

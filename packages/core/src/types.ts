@@ -26,6 +26,11 @@ export interface JobOptions {
   removeOnComplete?: boolean | number;
   /** true removes the job on final failure; a number keeps only the last N. */
   removeOnFail?: boolean | number;
+  /**
+   * Labels to find the job by later, e.g. `customer:42`. Up to 20; each is
+   * indexed until the job is deleted.
+   */
+  tags?: string[];
   /** Set by Meridian on jobs created by a scheduler; do not set it yourself. */
   repeat?: { scheduler: string; runAt: number };
 }

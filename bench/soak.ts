@@ -84,7 +84,7 @@ async function main(): Promise<void> {
       name: 'tick',
       data: { payload: '{"items":[1]}', n: 1 },
       // Same retention as the other jobs: counts apply to the queue's whole completed set.
-    options: { removeOnComplete: 1_000 },
+      options: { removeOnComplete: 1_000 },
     },
   );
 

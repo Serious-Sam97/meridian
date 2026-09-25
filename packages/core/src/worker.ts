@@ -92,8 +92,14 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private lockTimer?: NodeJS.Timeout;
   private stalledTimer?: NodeJS.Timeout;
   private closing?: Promise<void>;
-  /** Resolved by close() so a loop waiting for a free slot wakes up. */
-  private readonly stopRequested = Promise.withResolvers<void>();
+  /**
+   * One-shot wake-ups for waits that must end early: when a slot frees up or
+   * close() is called. Each wait registers its own resolver and removes it
+   * afterwards. Racing a single promise that stays pending for the worker's
+   * lifetime would leave one reaction on it per wait: a leak found by the
+   * soak test.
+   */
+  private readonly wakers = new Set<() => void>();
 
   constructor(
     readonly queueName: string,
@@ -141,7 +147,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private async loop(): Promise<void> {
     while (!this.closing) {
       if (this.slots.size >= this.concurrency) {
-        await Promise.race([...this.slots, this.stopRequested.promise]);
+        const { promise } = this.nextWake();
+        await promise;
         continue;
       }
 
@@ -160,7 +167,10 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         continue;
       }
 
-      const slot: Promise<void> = this.runSlot(fetched).finally(() => this.slots.delete(slot));
+      const slot: Promise<void> = this.runSlot(fetched).finally(() => {
+        this.slots.delete(slot);
+        this.wake();
+      });
       this.slots.add(slot);
     }
   }
@@ -225,21 +235,42 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
 
   /** Sleeps on the marker list until a job is added or the timeout passes. */
   private async waitForWork(timeoutMs: number): Promise<void> {
+    if (this.closing) return;
     // BLPOP treats 0 as "forever" and has 10ms resolution.
     const seconds = Math.max(timeoutMs, 10) / 1000;
     const blpop = this.blockingClient.blpop(this.keys.marker, seconds);
     // close() disconnects the blocking client, but if the connection was
     // dropped and ioredis is between reconnect attempts, the queued BLPOP is
-    // never rejected. Racing the stop signal keeps close() from hanging.
+    // never rejected. Racing a wake-up keeps close() from hanging.
     blpop.catch(() => {});
+    const wake = this.nextWake();
     try {
-      await Promise.race([blpop, this.stopRequested.promise]);
+      await Promise.race([blpop, wake.promise]);
     } catch (err) {
       if (!this.closing) {
         this.reportError(err);
         await delay(1_000);
       }
+    } finally {
+      wake.cancel();
     }
+  }
+
+  /** A promise resolved by the next wake(), and a way to stop waiting for it. */
+  private nextWake(): { promise: Promise<void>; cancel: () => void } {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => {
+      resolve = r;
+    });
+    if (this.closing) resolve();
+    else this.wakers.add(resolve);
+    return { promise, cancel: () => this.wakers.delete(resolve) };
+  }
+
+  private wake(): void {
+    const wakers = [...this.wakers];
+    this.wakers.clear();
+    for (const resolve of wakers) resolve();
   }
 
   private async process(job: Job<Data, Result>, token: string, signal: AbortSignal): Promise<void> {
@@ -447,7 +478,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   }
 
   private async shutdown(timeout: number | undefined): Promise<void> {
-    this.stopRequested.resolve();
+    this.wake();
     this.blockingClient.disconnect();
     await this.running;
 

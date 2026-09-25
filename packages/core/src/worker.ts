@@ -107,7 +107,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         continue;
       }
 
-      let fetched: { job: Job<Data, Result>; token: string } | undefined;
+      let fetched: Fetched<Data, Result>;
       try {
         fetched = await this.fetchNext();
       } catch (err) {
@@ -117,8 +117,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         continue;
       }
 
-      if (!fetched) {
-        await this.waitForWork();
+      if ('sleepMs' in fetched) {
+        await this.waitForWork(fetched.sleepMs);
         continue;
       }
 
@@ -131,24 +131,34 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     }
   }
 
-  private async fetchNext(): Promise<{ job: Job<Data, Result>; token: string } | undefined> {
+  private async fetchNext(): Promise<Fetched<Data, Result>> {
     const token = randomUUID();
-    const reply = await runScript<[string, string[]] | []>(
+    const reply = await runScript<[string, string[]] | [number]>(
       this.client,
       'moveToActive',
-      [this.keys.wait, this.keys.active, this.keys.events, this.keys.jobPrefix],
+      [this.keys.wait, this.keys.active, this.keys.delayed, this.keys.events, this.keys.jobPrefix],
       [token, this.lockDuration, this.maxEvents],
     );
-    if (reply.length === 0) return undefined;
+
+    if (reply.length === 1) {
+      // Nothing ready: sleep until the next delayed job is due, but no longer
+      // than blockTimeout so the loop still checks in regularly.
+      const [untilDelayed] = reply;
+      const sleepMs =
+        untilDelayed < 0 ? this.blockTimeout : Math.min(untilDelayed, this.blockTimeout);
+      return { sleepMs };
+    }
 
     const [id, flat] = reply;
     return { job: Job.fromHash<Data, Result>(id, toObject(flat)), token };
   }
 
   /** Sleeps on the marker list until a job is added or the timeout passes. */
-  private async waitForWork(): Promise<void> {
+  private async waitForWork(timeoutMs: number): Promise<void> {
+    // BLPOP treats 0 as "forever" and has 10ms resolution.
+    const seconds = Math.max(timeoutMs, 10) / 1000;
     try {
-      await this.blockingClient.blpop(this.keys.marker, this.blockTimeout / 1000);
+      await this.blockingClient.blpop(this.keys.marker, seconds);
     } catch (err) {
       // close() disconnects the blocking client to interrupt BLPOP.
       if (!this.closing) {
@@ -272,6 +282,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     else console.error(`[meridian] worker error on queue "${this.queueName}":`, error);
   }
 }
+
+type Fetched<Data, Result> = { job: Job<Data, Result>; token: string } | { sleepMs: number };
 
 function retention(option: boolean | number | undefined): number {
   if (option === true) return 0;

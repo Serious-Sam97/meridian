@@ -167,6 +167,52 @@ describe('Worker', () => {
     expect((await queue.getJobCounts()).completed).toBe(0);
   });
 
+  it('runs a delayed job once its delay has passed, not before', async () => {
+    const job = await queue.add('later', { n: 1 }, { delay: 300 });
+    let processedAt = 0;
+
+    startWorker(async () => {
+      processedAt = Date.now();
+    });
+
+    await waitFor(() => processedAt > 0);
+    const stored = await queue.getJob(job.id);
+    expect(processedAt - (stored?.timestamp ?? 0)).toBeGreaterThanOrEqual(290);
+  });
+
+  it('sleeps only until the next delayed job is due', async () => {
+    let processedAt = 0;
+    // blockTimeout far above the delay: the worker must wake for the job anyway.
+    startWorker(
+      async () => {
+        processedAt = Date.now();
+      },
+      { blockTimeout: 10_000 },
+    );
+    await new Promise((r) => setTimeout(r, 100));
+
+    const addedAt = Date.now();
+    await queue.add('later', { n: 1 }, { delay: 400 });
+
+    await waitFor(() => processedAt > 0, { timeout: 2_000 });
+    expect(processedAt - addedAt).toBeGreaterThanOrEqual(390);
+    expect(processedAt - addedAt).toBeLessThan(900);
+  });
+
+  it('keeps priority order for promoted delayed jobs', async () => {
+    await queue.add('job', { n: 2 }, { delay: 100, priority: 2 });
+    await queue.add('job', { n: 1 }, { delay: 100, priority: 1 });
+    await new Promise((r) => setTimeout(r, 150));
+    const seen: number[] = [];
+
+    startWorker(async (job) => {
+      seen.push(job.data.n);
+    });
+
+    await waitFor(() => seen.length === 2);
+    expect(seen).toEqual([1, 2]);
+  });
+
   it('renews the lock of a job that outlives lockDuration', async () => {
     const job = await queue.add('slow', { n: 1 });
     let done = false;

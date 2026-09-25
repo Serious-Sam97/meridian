@@ -1,5 +1,7 @@
 # Meridian
 
+[![CI](https://github.com/Serious-Sam97/meridian/actions/workflows/ci.yml/badge.svg)](https://github.com/Serious-Sam97/meridian/actions/workflows/ci.yml)
+
 A Redis-backed job queue for Node.js, with a Laravel Horizon-style **supervisor** that
 scales worker processes by workload and a live **dashboard**.
 

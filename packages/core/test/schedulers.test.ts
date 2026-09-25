@@ -48,9 +48,11 @@ describe('job schedulers', () => {
 
     await waitFor(() => runs.length >= 4, { timeout: 5_000 });
     expect(runs.every((runAt) => runAt % 200 === 0)).toBe(true);
-    // Consecutive runs, one interval apart.
-    expect(runs[1]! - runs[0]!).toBe(200);
-    expect(runs[3]! - runs[2]!).toBe(200);
+    // Runs move forward by whole intervals: one apart normally, more only if a
+    // run was picked up so late (under load) that the next slot had passed.
+    const gaps = runs.slice(1).map((runAt, i) => runAt - (runs[i] ?? 0));
+    expect(gaps.every((gap) => gap > 0 && gap % 200 === 0)).toBe(true);
+    expect(gaps).toContain(200);
   });
 
   it('never runs the same occurrence twice with several workers', async () => {

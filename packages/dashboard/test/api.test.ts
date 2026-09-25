@@ -183,6 +183,13 @@ describe('dashboard api', () => {
     expect(body.reduce((sum, b) => sum + b.completed, 0)).toBe(1);
   });
 
+  it('answers 400 to a malformed path instead of crashing', async () => {
+    const { status } = await api('/api/queues/%E0%A4%A/jobs');
+    expect(status).toBe(400);
+    // The server is still up.
+    expect((await api('/api/overview')).status).toBe(200);
+  });
+
   it('refuses mutations without the CSRF header', async () => {
     const job = await emails.add('send', { to: 'a' });
     const { status } = await api(`/api/queues/${emails.name}/jobs/${job.id}`, { method: 'DELETE' });

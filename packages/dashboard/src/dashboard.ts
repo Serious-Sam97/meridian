@@ -86,6 +86,18 @@ export function createDashboard(options: DashboardOptions = {}): Dashboard {
   const api = createApi({ client, prefix, events });
 
   async function handler(req: IncomingMessage, res: ServerResponse, next?: () => void) {
+    // Never let a request reject: callers typically fire-and-forget the handler,
+    // and an unhandled rejection would take the whole process down.
+    try {
+      await handle(req, res, next);
+    } catch (err) {
+      console.error('[meridian] dashboard request failed:', err);
+      if (!res.headersSent) sendJson(res, 500, { error: 'Internal error' });
+      else res.end();
+    }
+  }
+
+  async function handle(req: IncomingMessage, res: ServerResponse, next?: () => void) {
     // Express strips its mount path from req.url, so routes are always relative.
     const url = new URL(req.url ?? '/', 'http://dashboard.local');
 

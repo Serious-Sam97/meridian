@@ -49,12 +49,11 @@ export class Router {
       pathMatched = true;
       if (route.method !== req.method) continue;
 
-      const params: Record<string, string> = {};
-      route.keys.forEach((key, i) => {
-        params[key] = decodeURIComponent(match[i + 1] ?? '');
-      });
-
       try {
+        const params: Record<string, string> = {};
+        route.keys.forEach((key, i) => {
+          params[key] = decodeParam(match[i + 1] ?? '');
+        });
         const body = await route.handler({ req, res, params, query: url.searchParams });
         // Handlers that stream (SSE) write the response themselves.
         if (!res.headersSent) sendJson(res, 200, body ?? { ok: true });
@@ -73,6 +72,14 @@ export class Router {
       return true;
     }
     return false;
+  }
+}
+
+function decodeParam(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new HttpError(400, 'Malformed URL encoding');
   }
 }
 

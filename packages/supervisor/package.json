@@ -23,7 +23,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@meridian/core": "0.1.0"
+    "@meridian/core": "0.1.0",
+    "ioredis": "^6.0.0"
   },
   "license": "MIT"
 }

@@ -4,7 +4,8 @@
   "description": "Redis-backed job queue for Node.js with a Horizon-style supervisor and dashboard",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "bench"
   ],
   "engines": {
     "node": ">=22"
@@ -18,7 +19,8 @@
     "format": "biome format --write .",
     "check": "npm run lint && npm run typecheck && npm test",
     "redis:up": "docker compose up -d redis",
-    "redis:down": "docker compose down"
+    "redis:down": "docker compose down",
+    "bench": "npm run bench -w @meridian/bench --"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

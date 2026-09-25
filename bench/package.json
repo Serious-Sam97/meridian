@@ -1,0 +1,14 @@
+{
+  "name": "@meridian/bench",
+  "private": true,
+  "type": "module",
+  "description": "Throughput and latency benchmarks: Meridian vs BullMQ",
+  "scripts": {
+    "bench": "node --import tsx --conditions=@meridian/source run.ts"
+  },
+  "dependencies": {
+    "@meridian/core": "0.1.0",
+    "bullmq": "^6.3.8",
+    "ioredis": "^6.0.0"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@meridian/dashboard",
+  "version": "0.1.0",
+  "description": "Web dashboard for Meridian queues: throughput, failed jobs, supervisors and live events",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@meridian/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "meridian-dashboard": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "ui"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@meridian/core": "0.1.0",
+    "@meridian/supervisor": "0.1.0",
+    "ioredis": "^6.0.0"
+  },
+  "license": "MIT"
+}

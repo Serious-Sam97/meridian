@@ -9,6 +9,9 @@ export default defineConfig({
       '@meridian/supervisor': fileURLToPath(
         new URL('./packages/supervisor/src/index.ts', import.meta.url),
       ),
+      '@meridian/dashboard': fileURLToPath(
+        new URL('./packages/dashboard/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {

@@ -10,7 +10,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w @meridian/core && npm run build -w @meridian/supervisor && npm run build -w @meridian/dashboard",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",

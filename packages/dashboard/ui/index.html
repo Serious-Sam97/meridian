@@ -62,6 +62,9 @@
             <h2>Jobs</h2>
             <select id="job-queue" aria-label="Queue"></select>
           </div>
+          <div class="tag-search">
+            <input id="tag-input" type="search" placeholder="Find jobs by tag, e.g. customer:42" aria-label="Find jobs by tag" autocomplete="off" />
+          </div>
           <nav class="tabs" id="job-tabs" aria-label="Job state"></nav>
           <div class="job-actions">
             <button type="button" id="retry-all" class="secondary" hidden>Retry all failed</button>
@@ -78,6 +81,10 @@
           <section class="card">
             <div class="card-head"><h2>Supervisors</h2></div>
             <div id="supervisors"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>Schedulers</h2></div>
+            <div id="schedulers"></div>
           </section>
           <section class="card">
             <div class="card-head"><h2>Live events</h2></div>

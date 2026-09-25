@@ -14,6 +14,8 @@ const state = {
   total: 0,
   /** Last rendered job list, to skip re-rendering identical data (keeps hover and focus). */
   jobsKey: '',
+  /** When set, the job browser lists jobs with this tag instead of by state. */
+  tag: '',
 };
 
 // ---------- helpers ----------
@@ -142,6 +144,13 @@ function renderQueues({ queues }) {
           {},
           h('span', { class: 'queue-name' }, queue.name),
           queue.paused && h('span', { class: 'badge warn' }, 'paused'),
+          queue.rateLimit &&
+            h(
+              'span',
+              { class: 'badge', title: 'Rate limit shared by all workers' },
+              `≤ ${queue.rateLimit.max} / ${duration(queue.rateLimit.duration)}`,
+            ),
+          queue.schedulers > 0 && h('span', { class: 'badge' }, `${queue.schedulers} scheduled`),
         ),
         h('td', { class: 'num' }, number.format(queue.counts.waiting)),
         h('td', { class: 'num' }, number.format(queue.counts.active)),
@@ -168,6 +177,83 @@ function renderQueues({ queues }) {
             },
             queue.paused ? 'Resume' : 'Pause',
           ),
+        ),
+      ),
+    ),
+  );
+}
+
+/** A clickable tag that filters the job browser by that tag. */
+function tagChip(tag) {
+  return h(
+    'button',
+    {
+      type: 'button',
+      class: 'tag',
+      title: `Show jobs tagged ${tag}`,
+      onclick: (e) => {
+        e.stopPropagation();
+        $('job-dialog').close();
+        applyTag(tag);
+      },
+    },
+    tag,
+  );
+}
+
+function describeSchedule(schedule) {
+  if (schedule.every) return `every ${duration(schedule.every)}`;
+  return schedule.tz ? `${schedule.pattern} (${schedule.tz})` : schedule.pattern;
+}
+
+function until(timestamp) {
+  const seconds = Math.round((timestamp - Date.now()) / 1_000);
+  if (seconds <= 0) return 'due now';
+  if (seconds < 60) return `in ${seconds}s`;
+  if (seconds < 3_600) return `in ${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `in ${Math.floor(seconds / 3_600)}h`;
+  return new Date(timestamp).toLocaleString();
+}
+
+function renderSchedulers(schedulers) {
+  const root = $('schedulers');
+  if (schedulers.length === 0) {
+    root.replaceChildren(
+      h('p', { class: 'empty' }, 'No schedulers. Create one with queue.upsertScheduler().'),
+    );
+    return;
+  }
+  root.replaceChildren(
+    ...schedulers.map((s) =>
+      h(
+        'div',
+        { class: 'scheduler' },
+        h(
+          'div',
+          { class: 'main' },
+          h('strong', {}, s.id),
+          h('span', { class: 'muted' }, ` · ${s.queue} · ${s.template.name}`),
+          h(
+            'div',
+            { class: 'muted' },
+            `${describeSchedule(s.schedule)} · next ${until(s.next)} · ${s.iterations} runs`,
+          ),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'danger',
+            onclick: () => {
+              if (!confirm(`Remove scheduler "${s.id}" from ${s.queue}?`)) return;
+              void action(
+                `Removed ${s.id}`,
+                `queues/${q(s.queue)}/schedulers/${q(s.id)}`,
+                'DELETE',
+              );
+            },
+          },
+          'Remove',
         ),
       ),
     ),
@@ -271,9 +357,11 @@ function renderTabs() {
         'button',
         {
           role: 'tab',
-          'aria-selected': String(name === state.jobState),
+          'aria-selected': String(!state.tag && name === state.jobState),
           onclick: () => {
             state.jobState = name;
+            state.tag = '';
+            $('tag-input').value = '';
             state.page = 0;
             localSet('jobState', name);
             renderTabs();
@@ -285,7 +373,8 @@ function renderTabs() {
       ),
     ),
   );
-  $('retry-all').hidden = !(state.jobState === 'failed' && (queue?.counts.failed ?? 0) > 0);
+  $('retry-all').hidden =
+    Boolean(state.tag) || !(state.jobState === 'failed' && (queue?.counts.failed ?? 0) > 0);
 }
 
 function jobTime(job) {
@@ -300,19 +389,22 @@ async function loadJobs() {
     return;
   }
   try {
+    const filter = state.tag ? `tag=${q(state.tag)}` : `state=${state.jobState}`;
     const result = await api(
-      `queues/${q(state.queue)}/jobs?state=${state.jobState}&page=${state.page}&size=${PAGE_SIZE}`,
+      `queues/${q(state.queue)}/jobs?${filter}&page=${state.page}&size=${PAGE_SIZE}`,
     );
     state.total = result.total;
-    const key = JSON.stringify([state.queue, state.jobState, result]);
+    const key = JSON.stringify([state.queue, filter, result]);
     if (key === state.jobsKey) return;
     state.jobsKey = key;
     if (result.jobs.length === 0) {
-      list.replaceChildren(h('p', { class: 'empty' }, `No ${state.jobState} jobs`));
+      const empty = state.tag ? `No jobs tagged "${state.tag}"` : `No ${state.jobState} jobs`;
+      list.replaceChildren(h('p', { class: 'empty' }, empty));
     } else {
       list.replaceChildren(
-        ...result.jobs.map((job) =>
-          h(
+        ...result.jobs.map((job) => {
+          const showReason = state.jobState === 'failed' && !state.tag && job.failedReason;
+          return h(
             'li',
             {
               onclick: () => void openJob(job.id),
@@ -325,14 +417,20 @@ async function loadJobs() {
               h('div', { class: 'title' }, `#${job.id} `, job.name),
               h(
                 'div',
-                { class: job.failedReason && state.jobState === 'failed' ? 'sub reason' : 'sub' },
-                state.jobState === 'failed' ? job.failedReason : JSON.stringify(job.data),
+                { class: showReason ? 'sub reason' : 'sub' },
+                showReason ? job.failedReason : JSON.stringify(job.data),
               ),
+              job.opts.tags?.length > 0 &&
+                h(
+                  'div',
+                  { class: 'tags' },
+                  job.opts.tags.map((tag) => tagChip(tag)),
+                ),
             ),
             job.attemptsMade > 1 && h('span', { class: 'badge' }, `${job.attemptsMade} attempts`),
             h('span', { class: 'muted' }, jobTime(job)),
-          ),
-        ),
+          );
+        }),
       );
     }
     const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
@@ -377,9 +475,21 @@ async function openJob(id) {
         job.finishedOn && job.processedOn ? duration(job.finishedOn - job.processedOn) : '—',
       ],
       ['Attempts', `${job.attemptsMade} of ${job.opts.attempts ?? 1}`],
+      job.opts.tags?.length > 0 && [
+        'Tags',
+        h(
+          'span',
+          { class: 'tags' },
+          job.opts.tags.map((t) => tagChip(t)),
+        ),
+      ],
+      job.opts.repeat && [
+        'Scheduler',
+        `${job.opts.repeat.scheduler} (run of ${new Date(job.opts.repeat.runAt).toLocaleString()})`,
+      ],
     ];
     $('job-meta').replaceChildren(
-      ...meta.flatMap(([label, value]) => [h('dt', {}, label), h('dd', {}, value)]),
+      ...meta.filter(Boolean).flatMap(([label, value]) => [h('dt', {}, label), h('dd', {}, value)]),
     );
 
     $('job-sections').replaceChildren(
@@ -488,11 +598,16 @@ let refreshing;
 async function refresh() {
   refreshing ??= (async () => {
     try {
-      const [overview, metrics] = await Promise.all([api('overview'), api('metrics?minutes=60')]);
+      const [overview, metrics, schedulers] = await Promise.all([
+        api('overview'),
+        api('metrics?minutes=60'),
+        api('schedulers'),
+      ]);
       state.overview = overview;
       renderStats(overview);
       renderQueues(overview);
       renderSupervisors(overview);
+      renderSchedulers(schedulers);
       renderChart(metrics);
       syncQueueSelect(overview);
       renderTabs();
@@ -505,6 +620,20 @@ async function refresh() {
   })();
   return refreshing;
 }
+
+function applyTag(tag) {
+  state.tag = tag.trim();
+  state.page = 0;
+  $('tag-input').value = state.tag;
+  renderTabs();
+  void loadJobs();
+}
+
+$('tag-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') applyTag(e.target.value);
+});
+// The native clear button of a search field fires 'search' with an empty value.
+$('tag-input').addEventListener('search', (e) => applyTag(e.target.value));
 
 $('job-queue').addEventListener('change', (e) => {
   state.queue = e.target.value;

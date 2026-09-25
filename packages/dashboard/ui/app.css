@@ -553,3 +553,55 @@ pre.error {
     padding-right: 16px;
   }
 }
+
+.tag-search {
+  margin-bottom: 8px;
+}
+
+.tag-search input {
+  width: 100%;
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tag-search input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+button.tag {
+  font-size: 11px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.scheduler {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.scheduler:last-child {
+  border-bottom: 0;
+}
+
+.scheduler .main {
+  flex: 1;
+  min-width: 0;
+}

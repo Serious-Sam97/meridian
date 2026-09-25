@@ -6,6 +6,8 @@ import { HttpError, type RequestContext, Router } from './router.js';
 
 const STATES: ListableState[] = ['waiting', 'delayed', 'active', 'completed', 'failed'];
 const MAX_PAGE_SIZE = 100;
+/** Queue names come from URLs, so the cache of Queue objects must not grow unbounded. */
+const MAX_CACHED_QUEUES = 1_000;
 
 export interface ApiOptions {
   client: Redis;
@@ -27,6 +29,7 @@ export function createApi({ client, prefix, events }: ApiOptions): Router {
       } catch (err) {
         throw new HttpError(400, (err as Error).message);
       }
+      if (queues.size >= MAX_CACHED_QUEUES) queues.clear();
       queues.set(name, q);
     }
     return q;

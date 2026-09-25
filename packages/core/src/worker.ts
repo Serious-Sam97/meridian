@@ -5,7 +5,8 @@ import { computeBackoff } from './backoff.js';
 import { type ConnectionOptions, createConnection, duplicateConnection } from './connection.js';
 import { LockLostError, UnrecoverableError, WorkerClosingError } from './errors.js';
 import { Job } from './job.js';
-import { type QueueKeys, queueKeys } from './keys.js';
+import { type QueueKeys, queueKeys, schedulerScriptKeys } from './keys.js';
+import { nextRun, redisNow, type Schedule } from './schedule.js';
 import { runScript } from './scripts.js';
 
 /**
@@ -171,6 +172,9 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
       const { job, token } = current;
       const controller = new AbortController();
       this.active.set(job.id, { token, controller, finishing: false });
+      // Plan the next run before this one starts, so a slow or failing run
+      // never stops its scheduler (ADR 0006).
+      if (job.opts.repeat) await this.advanceScheduler(job.opts.repeat);
       try {
         await this.process(job, token, controller.signal);
       } finally {
@@ -311,6 +315,26 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     );
     if (code !== 0) throw new LockLostError(job.id);
     job.attemptsMade += 1;
+  }
+
+  private async advanceScheduler(repeat: { scheduler: string; runAt: number }): Promise<void> {
+    try {
+      const raw = await this.client.hget(this.keys.scheduler(repeat.scheduler), 'schedule');
+      if (!raw) return; // removed since this run was planned
+      const now = await redisNow(this.client);
+      // Runs missed while nothing consumed the queue are skipped, like cron.
+      const next = nextRun(JSON.parse(raw) as Schedule, Math.max(repeat.runAt, now));
+      await runScript(
+        this.client,
+        'advanceScheduler',
+        schedulerScriptKeys(this.keys, repeat.scheduler),
+        [repeat.scheduler, repeat.runAt, next, this.maxEvents],
+      );
+    } catch (err) {
+      // The run still happens; the stalled checker or the next retry of this
+      // job gets another chance to advance the scheduler.
+      this.reportError(err);
+    }
   }
 
   private shouldRetry(job: Job<Data, Result>, error: Error): boolean {

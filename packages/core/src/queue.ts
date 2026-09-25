@@ -1,7 +1,8 @@
 import type { Redis } from 'ioredis';
 import { type ConnectionOptions, createConnection } from './connection.js';
 import { Job } from './job.js';
-import { type QueueKeys, queueKeys } from './keys.js';
+import { type QueueKeys, queueKeys, schedulerScriptKeys } from './keys.js';
+import { nextRun, redisNow, type Schedule, validateSchedule } from './schedule.js';
 import { runScript } from './scripts.js';
 import {
   type JobCounts,
@@ -12,6 +13,24 @@ import {
 } from './types.js';
 
 export type ListableState = Exclude<JobState, 'unknown'>;
+
+/** The job a scheduler creates on each run. */
+export interface JobTemplate<Data> {
+  name: string;
+  data?: Data;
+  options?: Omit<JobOptions, 'jobId' | 'delay' | 'repeat'>;
+}
+
+export interface SchedulerInfo<Data = unknown> {
+  id: string;
+  schedule: Schedule;
+  /** Next run, in ms since the epoch. */
+  next: number;
+  /** Runs already started. */
+  iterations: number;
+  createdAt: number;
+  template: Required<Pick<JobTemplate<Data>, 'name'>> & JobTemplate<Data>;
+}
 
 export interface QueueOptions {
   connection?: ConnectionOptions;
@@ -91,6 +110,63 @@ export class Queue<Data = unknown> {
       added.push(...(await Promise.all(chunk.map((j) => this.add(j.name, j.data, j.options)))));
     }
     return added;
+  }
+
+  /**
+   * Creates or updates a scheduler that adds a job on a schedule (ADR 0006).
+   * Calling it again with the same settings is a no-op, so it can run on
+   * every deploy.
+   */
+  async upsertScheduler(
+    id: string,
+    schedule: Schedule,
+    template: JobTemplate<Data>,
+  ): Promise<SchedulerInfo<Data>> {
+    if (!id || id.includes(':'))
+      throw new RangeError('scheduler id must be non-empty and not contain ":"');
+    validateSchedule(schedule);
+    const options = { ...this.defaultJobOptions, ...template.options };
+    validateOptions(options);
+
+    const next = nextRun(schedule, await redisNow(this.client));
+    await runScript(this.client, 'upsertScheduler', schedulerScriptKeys(this.keys, id), [
+      id,
+      JSON.stringify(schedule),
+      template.name,
+      JSON.stringify(template.data ?? null),
+      JSON.stringify(options),
+      next,
+      this.maxEvents,
+    ]);
+    return (await this.getScheduler(id)) as SchedulerInfo<Data>;
+  }
+
+  /** Deletes a scheduler and its pending run. A run already in progress finishes. */
+  async removeScheduler(id: string): Promise<boolean> {
+    const removed = await runScript<number>(
+      this.client,
+      'removeScheduler',
+      [this.keys.schedulers, this.keys.scheduler(id), this.keys.delayed, this.keys.jobPrefix],
+      [id],
+    );
+    return removed === 1;
+  }
+
+  async getScheduler(id: string): Promise<SchedulerInfo<Data> | undefined> {
+    const hash = await this.client.hgetall(this.keys.scheduler(id));
+    return Object.keys(hash).length === 0 ? undefined : parseScheduler<Data>(id, hash);
+  }
+
+  /** Every scheduler of the queue, soonest next run first. */
+  async getSchedulers(): Promise<SchedulerInfo<Data>[]> {
+    const ids = await this.client.zrange(this.keys.schedulers, '0', '-1');
+    const pipeline = this.client.pipeline();
+    for (const id of ids) pipeline.hgetall(this.keys.scheduler(id));
+    const hashes = (await pipeline.exec()) ?? [];
+    return ids.flatMap((id, i) => {
+      const hash = hashes[i]?.[1] as Record<string, string> | undefined;
+      return hash && Object.keys(hash).length > 0 ? [parseScheduler<Data>(id, hash)] : [];
+    });
   }
 
   async getJob<Result = unknown>(id: string): Promise<Job<Data, Result> | undefined> {
@@ -299,6 +375,21 @@ export class Queue<Data = unknown> {
   async close(): Promise<void> {
     if (this.ownsClient) await this.client.quit();
   }
+}
+
+function parseScheduler<Data>(id: string, hash: Record<string, string>): SchedulerInfo<Data> {
+  return {
+    id,
+    schedule: JSON.parse(hash.schedule ?? '{}') as Schedule,
+    next: Number(hash.next),
+    iterations: Number(hash.iterations ?? 0),
+    createdAt: Number(hash.createdAt),
+    template: {
+      name: hash.name ?? '',
+      data: JSON.parse(hash.data ?? 'null') as Data,
+      options: JSON.parse(hash.opts ?? '{}') as JobTemplate<Data>['options'],
+    },
+  };
 }
 
 function validateOptions(opts: JobOptions): void {

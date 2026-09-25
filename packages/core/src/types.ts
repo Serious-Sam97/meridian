@@ -26,6 +26,8 @@ export interface JobOptions {
   removeOnComplete?: boolean | number;
   /** true removes the job on final failure; a number keeps only the last N. */
   removeOnFail?: boolean | number;
+  /** Set by Meridian on jobs created by a scheduler; do not set it yourself. */
+  repeat?: { scheduler: string; runAt: number };
 }
 
 export type JobState = 'waiting' | 'delayed' | 'active' | 'completed' | 'failed' | 'unknown';

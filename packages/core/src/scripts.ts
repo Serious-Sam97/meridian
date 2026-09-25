@@ -4,14 +4,17 @@ import type { Redis } from 'ioredis';
 
 export type ScriptName =
   | 'addJob'
+  | 'advanceScheduler'
   | 'extendLocks'
   | 'moveToActive'
   | 'moveToFinished'
   | 'moveStalledJobs'
   | 'releaseJob'
   | 'removeJob'
+  | 'removeScheduler'
   | 'retryFailedJob'
-  | 'retryJob';
+  | 'retryJob'
+  | 'upsertScheduler';
 
 interface LoadedScript {
   source: string;

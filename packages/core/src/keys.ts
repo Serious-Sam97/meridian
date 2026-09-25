@@ -13,10 +13,27 @@ export interface QueueKeys {
   stalledCheck: string;
   /** Prefix for per-minute metric buckets; the bucket start (ms) is appended. */
   metricsPrefix: string;
+  /** Sorted set of scheduler ids by next run time (ADR 0006). */
+  schedulers: string;
+  scheduler(id: string): string;
   /** Prefix for job hashes; the job id is appended inside Lua scripts. */
   jobPrefix: string;
   job(id: string): string;
   lock(id: string): string;
+}
+
+/** Keys used by the scheduler scripts, in the order they expect them. */
+export function schedulerScriptKeys(keys: QueueKeys, id: string): string[] {
+  return [
+    keys.schedulers,
+    keys.scheduler(id),
+    keys.id,
+    keys.wait,
+    keys.delayed,
+    keys.marker,
+    keys.events,
+    keys.jobPrefix,
+  ];
 }
 
 /**
@@ -45,6 +62,8 @@ export function queueKeys(queue: string, prefix = 'meridian'): QueueKeys {
     events: `${base}events`,
     stalledCheck: `${base}stalled-check`,
     metricsPrefix: `${base}metrics:`,
+    schedulers: `${base}schedulers`,
+    scheduler: (id) => `${base}scheduler:${id}`,
     jobPrefix,
     job: (id) => `${jobPrefix}${id}`,
     lock: (id) => `${jobPrefix}${id}:lock`,

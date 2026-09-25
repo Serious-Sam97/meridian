@@ -34,6 +34,13 @@ export interface WorkerOptions {
   lockDuration?: number;
   /** Longest time an idle worker sleeps before polling again, in ms. Defaults to 5s. */
   blockTimeout?: number;
+  /**
+   * How often to look for jobs abandoned by dead workers, in ms. Defaults to 30s.
+   * The check is throttled queue-wide, so use the same value on every worker.
+   */
+  stalledInterval?: number;
+  /** Times a job may stall before it is failed instead of recovered. Defaults to 1. */
+  maxStalledCount?: number;
   maxEvents?: number;
   /** Start processing immediately. Defaults to true. */
   autorun?: boolean;
@@ -46,6 +53,8 @@ export interface WorkerEvents<Data, Result> {
   retrying: [job: Job<Data, Result>, error: Error, delay: number];
   /** The job failed for good: no attempts left, or an UnrecoverableError. */
   failed: [job: Job<Data, Result>, error: Error];
+  /** Jobs this worker found abandoned by a dead worker and put back in the queue. */
+  stalled: [jobIds: string[]];
   error: [error: Error];
 }
 
@@ -59,11 +68,14 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private readonly concurrency: number;
   private readonly lockDuration: number;
   private readonly blockTimeout: number;
+  private readonly stalledInterval: number;
+  private readonly maxStalledCount: number;
   private readonly maxEvents: number;
 
   private readonly active = new Map<string, ActiveJob>();
   private running?: Promise<void>;
   private lockTimer?: NodeJS.Timeout;
+  private stalledTimer?: NodeJS.Timeout;
   private closing?: Promise<void>;
 
   constructor(
@@ -80,6 +92,8 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     this.concurrency = options.concurrency ?? 1;
     this.lockDuration = options.lockDuration ?? 30_000;
     this.blockTimeout = options.blockTimeout ?? 5_000;
+    this.stalledInterval = options.stalledInterval ?? 30_000;
+    this.maxStalledCount = options.maxStalledCount ?? 1;
     this.maxEvents = options.maxEvents ?? 10_000;
 
     if (!Number.isInteger(this.concurrency) || this.concurrency < 1) {
@@ -96,6 +110,9 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     if (this.running) return;
     this.running = this.loop().catch((err) => this.reportError(err));
     this.lockTimer = setInterval(() => void this.extendLocks(), this.lockDuration / 2);
+    // Check right away too: jobs left behind by a crashed process are recovered on restart.
+    void this.checkStalled();
+    this.stalledTimer = setInterval(() => void this.checkStalled(), this.stalledInterval);
   }
 
   /** Stops fetching new jobs and waits for the ones in progress to finish. */
@@ -302,6 +319,29 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     }
   }
 
+  private async checkStalled(): Promise<void> {
+    try {
+      const [recovered, failed] = await runScript<[string[], string[]]>(
+        this.client,
+        'moveStalledJobs',
+        [
+          this.keys.stalledCheck,
+          this.keys.active,
+          this.keys.wait,
+          this.keys.failed,
+          this.keys.marker,
+          this.keys.events,
+          this.keys.jobPrefix,
+        ],
+        [this.stalledInterval, this.maxStalledCount, this.maxEvents],
+      );
+      if (recovered.length > 0 || failed.length > 0)
+        this.emit('stalled', [...recovered, ...failed]);
+    } catch (err) {
+      if (!this.closing) this.reportError(err);
+    }
+  }
+
   private activeTasks(): Promise<void>[] {
     return [...this.active.values()].map((entry) => entry.task);
   }
@@ -311,6 +351,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     await this.running;
     await Promise.allSettled(this.activeTasks());
     clearInterval(this.lockTimer);
+    clearInterval(this.stalledTimer);
     if (this.ownsClient) await this.client.quit();
   }
 

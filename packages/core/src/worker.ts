@@ -7,7 +7,22 @@ import { Job } from './job.js';
 import { type QueueKeys, queueKeys } from './keys.js';
 import { runScript } from './scripts.js';
 
-export type Processor<Data, Result> = (job: Job<Data, Result>) => Promise<Result>;
+/**
+ * Handles one job. The signal is aborted when the worker loses the job's lock,
+ * so long-running handlers can stop early; their result would be discarded.
+ */
+export type Processor<Data, Result> = (
+  job: Job<Data, Result>,
+  signal: AbortSignal,
+) => Promise<Result>;
+
+interface ActiveJob {
+  token: string;
+  controller: AbortController;
+  task: Promise<void>;
+  /** Set once the result is being written, when the lock is released on purpose. */
+  finishing: boolean;
+}
 
 export interface WorkerOptions {
   connection?: ConnectionOptions;
@@ -42,8 +57,9 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private readonly blockTimeout: number;
   private readonly maxEvents: number;
 
-  private readonly active = new Map<string, Promise<void>>();
+  private readonly active = new Map<string, ActiveJob>();
   private running?: Promise<void>;
+  private lockTimer?: NodeJS.Timeout;
   private closing?: Promise<void>;
 
   constructor(
@@ -75,6 +91,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   run(): void {
     if (this.running) return;
     this.running = this.loop().catch((err) => this.reportError(err));
+    this.lockTimer = setInterval(() => void this.extendLocks(), this.lockDuration / 2);
   }
 
   /** Stops fetching new jobs and waits for the ones in progress to finish. */
@@ -86,7 +103,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   private async loop(): Promise<void> {
     while (!this.closing) {
       if (this.active.size >= this.concurrency) {
-        await Promise.race(this.active.values());
+        await Promise.race(this.activeTasks());
         continue;
       }
 
@@ -106,8 +123,11 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
       }
 
       const { job, token } = fetched;
-      const task = this.process(job, token).finally(() => this.active.delete(job.id));
-      this.active.set(job.id, task);
+      const controller = new AbortController();
+      const task = this.process(job, token, controller.signal).finally(() =>
+        this.active.delete(job.id),
+      );
+      this.active.set(job.id, { token, controller, task, finishing: false });
     }
   }
 
@@ -138,14 +158,19 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     }
   }
 
-  private async process(job: Job<Data, Result>, token: string): Promise<void> {
+  private async process(job: Job<Data, Result>, token: string, signal: AbortSignal): Promise<void> {
     let outcome: { ok: true; result: Result } | { ok: false; error: Error };
     try {
       this.emit('active', job);
-      outcome = { ok: true, result: await this.processor(job) };
+      outcome = { ok: true, result: await this.processor(job, signal) };
     } catch (err) {
       outcome = { ok: false, error: toError(err) };
     }
+
+    // Another worker may already own the job; the loss was reported by extendLocks.
+    if (signal.aborted) return;
+    const entry = this.active.get(job.id);
+    if (entry) entry.finishing = true;
 
     // Errors from here on are infrastructure problems (Redis down, lock lost),
     // not job failures, so they go to the 'error' event instead.
@@ -205,10 +230,39 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     job.attemptsMade += 1;
   }
 
+  /** Renews the locks of all active jobs and aborts the ones that were lost. */
+  private async extendLocks(): Promise<void> {
+    if (this.active.size === 0) return;
+
+    const args: (string | number)[] = [this.lockDuration];
+    for (const [id, { token }] of this.active) args.push(id, token);
+
+    let lost: string[];
+    try {
+      lost = await runScript<string[]>(this.client, 'extendLocks', [this.keys.jobPrefix], args);
+    } catch (err) {
+      this.reportError(err);
+      return;
+    }
+
+    for (const id of lost) {
+      const entry = this.active.get(id);
+      if (!entry || entry.finishing || entry.controller.signal.aborted) continue;
+      const error = new LockLostError(id);
+      entry.controller.abort(error);
+      this.reportError(error);
+    }
+  }
+
+  private activeTasks(): Promise<void>[] {
+    return [...this.active.values()].map((entry) => entry.task);
+  }
+
   private async shutdown(): Promise<void> {
     this.blockingClient.disconnect();
     await this.running;
-    await Promise.allSettled(this.active.values());
+    await Promise.allSettled(this.activeTasks());
+    clearInterval(this.lockTimer);
     if (this.ownsClient) await this.client.quit();
   }
 

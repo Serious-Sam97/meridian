@@ -1,6 +1,6 @@
 import type { Redis } from 'ioredis';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { type Job, Queue, Worker, type WorkerOptions } from '../src/index.js';
+import { LockLostError, type Processor, Queue, Worker, type WorkerOptions } from '../src/index.js';
 import { createRedis, uniqueQueueName, waitFor } from './helpers.js';
 
 describe('Worker', () => {
@@ -9,7 +9,7 @@ describe('Worker', () => {
   const workers: Worker<{ n: number }, unknown>[] = [];
 
   function startWorker<R>(
-    processor: (job: Job<{ n: number }, R>) => Promise<R>,
+    processor: Processor<{ n: number }, R>,
     options: WorkerOptions = {},
   ): Worker<{ n: number }, R> {
     const worker = new Worker<{ n: number }, R>(queue.name, processor, {
@@ -165,6 +165,55 @@ describe('Worker', () => {
     await waitFor(() => done);
     await waitFor(async () => (await queue.getJob(job.id)) === undefined);
     expect((await queue.getJobCounts()).completed).toBe(0);
+  });
+
+  it('renews the lock of a job that outlives lockDuration', async () => {
+    const job = await queue.add('slow', { n: 1 });
+    let done = false;
+    const errors: Error[] = [];
+
+    const worker = startWorker(
+      async () => {
+        await new Promise((r) => setTimeout(r, 700));
+        done = true;
+      },
+      { lockDuration: 200 },
+    );
+    worker.on('error', (err) => errors.push(err));
+
+    await waitFor(() => done);
+    await waitFor(async () => (await queue.getJobState(job.id)) === 'completed');
+    expect(errors).toEqual([]);
+  });
+
+  it('aborts the processor and discards the result when the lock is lost', async () => {
+    const job = await queue.add('slow', { n: 1 });
+    let aborted: unknown;
+    const errors: Error[] = [];
+    const completed: string[] = [];
+
+    const worker = startWorker(
+      (_job, signal) =>
+        new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            aborted = signal.reason;
+            resolve('late result');
+          });
+        }),
+      { lockDuration: 200 },
+    );
+    worker.on('error', (err) => errors.push(err));
+    worker.on('completed', (j) => completed.push(j.id));
+
+    await waitFor(async () => (await queue.getJobState(job.id)) === 'active');
+    // Simulate the stalled checker handing the job to another worker.
+    await redis.set(queue.keys.lock(job.id), 'someone-else');
+
+    await waitFor(() => aborted !== undefined);
+    expect(aborted).toBeInstanceOf(LockLostError);
+    expect(errors.map((e) => e.name)).toEqual(['LockLostError']);
+    expect(completed).toEqual([]);
+    expect(await queue.getJobState(job.id)).toBe('active');
   });
 
   it('close() waits for in-flight jobs to finish', async () => {

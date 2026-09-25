@@ -1,0 +1,29 @@
+{
+  "name": "@meridian/supervisor",
+  "version": "0.1.0",
+  "description": "Horizon-style supervisor: pools of worker processes balanced by queue workload",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "@meridian/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "meridian-supervisor": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@meridian/core": "0.1.0"
+  },
+  "license": "MIT"
+}

@@ -75,6 +75,24 @@ export class Router {
   }
 }
 
+const MAX_BODY = 16 * 1024;
+
+/** Reads a small JSON request body. */
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  let size = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > MAX_BODY) throw new HttpError(413, 'Request body too large');
+    chunks.push(chunk as Buffer);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null');
+  } catch {
+    throw new HttpError(400, 'Request body must be JSON');
+  }
+}
+
 function decodeParam(value: string): string {
   try {
     return decodeURIComponent(value);

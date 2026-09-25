@@ -190,6 +190,58 @@ describe('dashboard api', () => {
     expect((await api('/api/overview')).status).toBe(200);
   });
 
+  it('lists jobs by tag', async () => {
+    await emails.add('send', { to: 'a' }, { tags: ['customer:42'] });
+    await emails.add('send', { to: 'b' }, { tags: ['customer:7'] });
+
+    const { body } = await api<{ total: number; jobs: { data: { to: string } }[] }>(
+      `/api/queues/${emails.name}/jobs?tag=${encodeURIComponent('customer:42')}`,
+    );
+    expect(body.total).toBe(1);
+    expect(body.jobs.map((j) => j.data.to)).toEqual(['a']);
+  });
+
+  it('lists and deletes schedulers across queues', async () => {
+    await emails.upsertScheduler(
+      'digest',
+      { every: 60_000 },
+      { name: 'digest', data: { to: 'x' } },
+    );
+
+    const { body } = await api<{ queue: string; id: string; next: number }[]>('/api/schedulers');
+    expect(body.map(({ queue, id }) => ({ queue, id }))).toEqual([
+      { queue: emails.name, id: 'digest' },
+    ]);
+    expect((await api(`/api/queues/${emails.name}`)).body.schedulers).toBe(1);
+
+    const removed = await api(`/api/queues/${emails.name}/schedulers/digest`, mutate('DELETE'));
+    expect(removed.status).toBe(200);
+    expect(
+      (await api(`/api/queues/${emails.name}/schedulers/digest`, mutate('DELETE'))).status,
+    ).toBe(404);
+  });
+
+  it('sets and clears the rate limit', async () => {
+    const put = (body: string) =>
+      api(`/api/queues/${emails.name}/rate-limit`, {
+        method: 'PUT',
+        headers: { 'x-meridian-request': '1', 'content-type': 'application/json' },
+        body,
+      });
+
+    expect((await put('{"max": 10, "duration": 1000}')).status).toBe(200);
+    expect((await api(`/api/queues/${emails.name}`)).body.rateLimit).toEqual({
+      max: 10,
+      duration: 1000,
+    });
+
+    expect((await put('{"max": 0, "duration": 1000}')).status).toBe(400);
+    expect((await put('not json')).status).toBe(400);
+
+    await api(`/api/queues/${emails.name}/rate-limit`, mutate('DELETE'));
+    expect((await api(`/api/queues/${emails.name}`)).body.rateLimit).toBeNull();
+  });
+
   it('refuses mutations without the CSRF header', async () => {
     const job = await emails.add('send', { to: 'a' });
     const { status } = await api(`/api/queues/${emails.name}/jobs/${job.id}`, { method: 'DELETE' });

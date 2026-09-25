@@ -2,7 +2,7 @@ import { type Job, type ListableState, Queue } from '@meridian/core';
 import { Supervisor } from '@meridian/supervisor';
 import type { Redis } from 'ioredis';
 import type { EventHub } from './events.js';
-import { HttpError, type RequestContext, Router } from './router.js';
+import { HttpError, type RequestContext, Router, readJson } from './router.js';
 
 const STATES: ListableState[] = ['waiting', 'delayed', 'active', 'completed', 'failed'];
 const MAX_PAGE_SIZE = 100;
@@ -37,10 +37,12 @@ export function createApi({ client, prefix, events }: ApiOptions): Router {
 
   async function summary(name: string) {
     const q = queue(name);
-    const [counts, paused, metrics] = await Promise.all([
+    const [counts, paused, metrics, rateLimit, schedulers] = await Promise.all([
       q.getJobCounts(),
       q.isPaused(),
       q.getMetrics(SUMMARY_MINUTES),
+      q.getRateLimit(),
+      client.zcard(q.keys.schedulers),
     ]);
     let completed = 0;
     let failed = 0;
@@ -58,6 +60,8 @@ export function createApi({ client, prefix, events }: ApiOptions): Router {
       name,
       counts,
       paused,
+      rateLimit,
+      schedulers,
       jobsPerMinute: Math.round((finished / SUMMARY_MINUTES) * 10) / 10,
       failureRate: finished ? failed / finished : 0,
       avgRuntime: finished ? Math.round(runtime / finished) : 0,
@@ -137,6 +141,17 @@ export function createApi({ client, prefix, events }: ApiOptions): Router {
     )
 
     .on('GET', '/api/queues/:name/jobs', async ({ params, query }) => {
+      const tag = query.get('tag');
+      if (tag) {
+        const page = Math.max(0, Number(query.get('page') ?? 0) || 0);
+        const size = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(query.get('size') ?? 20) || 20));
+        const q = queue(params.name ?? '');
+        const [jobs, total] = await Promise.all([
+          q.getJobsByTag(tag, page * size, page * size + size - 1),
+          q.countJobsByTag(tag),
+        ]);
+        return { tag, page, size, total, jobs };
+      }
       const state = (query.get('state') ?? 'failed') as ListableState;
       if (!STATES.includes(state))
         throw new HttpError(400, `state must be one of ${STATES.join(', ')}`);
@@ -175,6 +190,40 @@ export function createApi({ client, prefix, events }: ApiOptions): Router {
     .on('POST', '/api/queues/:name/retry-failed', async ({ params }) => ({
       retried: await queue(params.name ?? '').retryAllFailed(),
     }))
+
+    .on('GET', '/api/schedulers', async () => {
+      const names = await Queue.discover(client, prefix);
+      const lists = await Promise.all(
+        names.map(async (name) =>
+          (await queue(name).getSchedulers()).map((s) => ({ queue: name, ...s })),
+        ),
+      );
+      return lists.flat().sort((a, b) => a.next - b.next);
+    })
+
+    .on('DELETE', '/api/queues/:name/schedulers/:id', async ({ params }) => {
+      if (!(await queue(params.name ?? '').removeScheduler(params.id ?? ''))) {
+        throw new HttpError(404, 'Scheduler not found');
+      }
+      return { ok: true };
+    })
+
+    .on('PUT', '/api/queues/:name/rate-limit', async ({ req, params }) => {
+      const body = (await readJson(req)) as { max?: unknown; duration?: unknown } | null;
+      try {
+        await queue(params.name ?? '').setRateLimit(
+          body === null ? null : { max: Number(body.max), duration: Number(body.duration) },
+        );
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { ok: true };
+    })
+
+    .on('DELETE', '/api/queues/:name/rate-limit', async ({ params }) => {
+      await queue(params.name ?? '').setRateLimit(null);
+      return { ok: true };
+    })
 
     .on('POST', '/api/queues/:name/pause', async ({ params }) => {
       await queue(params.name ?? '').pause();

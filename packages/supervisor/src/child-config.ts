@@ -1,4 +1,4 @@
-import type { WorkerOptions } from '@meridian/core';
+import type { ClusterConnection, WorkerOptions } from '@meridian/core';
 import type { RedisOptions } from 'ioredis';
 
 /**
@@ -20,7 +20,7 @@ export interface ChildConfig {
   queue: string;
   /** Absolute path of a module whose default export is the processor. */
   processor: string;
-  connection: string | RedisOptions;
+  connection: string | RedisOptions | ClusterConnection;
   prefix?: string;
   concurrency: number;
   /** How long a scale-down waits for running jobs before releasing them, in ms. */

@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
 import { hostname } from 'node:os';
 import { resolve } from 'node:path';
-import { Queue } from '@meridian/core';
-import { Redis, type RedisOptions } from 'ioredis';
+import { type ClusterConnection, createConnection, Queue, type RedisClient } from '@meridian/core';
+import type { RedisOptions } from 'ioredis';
 import { type Allocation, type BalanceStrategy, balance, type QueueLoad } from './balancer.js';
 import type { ChildConfig, RecycleOptions } from './child-config.js';
 import { ProcessPool } from './pool.js';
@@ -22,8 +22,11 @@ export interface SupervisedQueue {
 export interface SupervisorOptions {
   /** Shown in the dashboard. Defaults to `<hostname>:<pid>`. */
   name?: string;
-  /** Redis URL or options. Must be serializable: child processes connect with it too. */
-  connection?: string | RedisOptions;
+  /**
+   * Redis URL, options, or `{ cluster: nodes }` for Redis Cluster. Must be
+   * serializable: worker processes connect with it too.
+   */
+  connection?: string | RedisOptions | ClusterConnection;
   prefix?: string;
   queues: Record<string, SupervisedQueue>;
   /** Defaults to 'auto'. */
@@ -76,7 +79,7 @@ export function supervisorsKey(prefix = 'meridian'): string {
  */
 export class Supervisor extends EventEmitter<SupervisorEvents> {
   readonly name: string;
-  private readonly client: Redis;
+  private readonly client: RedisClient;
   private readonly queues = new Map<string, Queue>();
   private readonly pools = new Map<string, ProcessPool>();
   private readonly strategy: BalanceStrategy;
@@ -113,10 +116,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     }
 
     const connection = options.connection ?? 'redis://127.0.0.1:6379';
-    this.client =
-      typeof connection === 'string'
-        ? new Redis(connection, { maxRetriesPerRequest: null })
-        : new Redis({ ...connection, maxRetriesPerRequest: null });
+    this.client = createConnection(connection).client;
 
     for (const [queue, config] of Object.entries(options.queues)) {
       this.queues.set(queue, new Queue(queue, { connection: this.client, prefix: this.prefix }));
@@ -184,7 +184,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
 
   /** Supervisors whose heartbeat is younger than `maxAge` ms. */
   static async list(
-    client: Redis,
+    client: RedisClient,
     prefix = 'meridian',
     maxAge = 15_000,
   ): Promise<SupervisorStatus[]> {

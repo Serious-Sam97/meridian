@@ -1,6 +1,6 @@
 import type { ServerResponse } from 'node:http';
-import { Queue, queueKeys } from '@meridian/core';
-import type { Redis } from 'ioredis';
+import { duplicateConnection, Queue, queueKeys, type RedisClient } from '@meridian/core';
+import { Cluster } from 'ioredis';
 
 export interface QueueEvent {
   id: string;
@@ -13,6 +13,9 @@ export interface QueueEvent {
 const DISCOVERY_INTERVAL = 5_000;
 const KEEPALIVE_INTERVAL = 15_000;
 const BLOCK_MS = 2_000;
+const CLUSTER_POLL_MS = 250;
+
+type StreamReply = [string, [string, string[]][]][] | null;
 
 /**
  * Tails the events stream of every queue with one blocking XREAD loop and
@@ -23,14 +26,14 @@ export class EventHub {
   private readonly clients = new Set<ServerResponse>();
   /** Last delivered stream id per events key. */
   private readonly cursors = new Map<string, string>();
-  private reader?: Redis;
+  private reader?: RedisClient;
   /** Loops still winding down after stop() are awaited by close(). */
   private readonly loops = new Set<Promise<void>>();
   private keepalive?: NodeJS.Timeout;
   private lastDiscovery = 0;
 
   constructor(
-    private readonly client: Redis,
+    private readonly client: RedisClient,
     private readonly prefix: string,
   ) {}
 
@@ -66,7 +69,7 @@ export class EventHub {
     // Keyed on the reader, not the loop: after a quick disconnect/reconnect
     // the previous loop may still be exiting, and must not block a new one.
     if (this.reader) return;
-    const reader = this.client.duplicate({ maxRetriesPerRequest: null });
+    const reader = duplicateConnection(this.client);
     this.reader = reader;
     this.keepalive = setInterval(() => this.broadcast(': keepalive\n\n'), KEEPALIVE_INTERVAL);
     const loop = this.run(reader)
@@ -83,7 +86,7 @@ export class EventHub {
     this.lastDiscovery = 0;
   }
 
-  private async run(reader: Redis): Promise<void> {
+  private async run(reader: RedisClient): Promise<void> {
     while (this.reader === reader) {
       await this.discover(reader);
       if (this.cursors.size === 0) {
@@ -91,18 +94,9 @@ export class EventHub {
         continue;
       }
 
-      const keys = [...this.cursors.keys()];
-      let reply: [string, [string, string[]][]][] | null;
+      let reply: StreamReply;
       try {
-        reply = (await reader.xread(
-          'COUNT',
-          500,
-          'BLOCK',
-          BLOCK_MS,
-          'STREAMS',
-          ...keys,
-          ...keys.map((key) => this.cursors.get(key) ?? '$'),
-        )) as [string, [string, string[]][]][] | null;
+        reply = await this.read(reader);
       } catch (err) {
         if (this.reader !== reader) return; // disconnected by stop()
         throw err;
@@ -122,7 +116,42 @@ export class EventHub {
   }
 
   /** Adds streams of queues created since the last check, starting from now. */
-  private async discover(reader: Redis): Promise<void> {
+  /**
+   * One blocking XREAD over every stream. On Redis Cluster the streams live in
+   * different slots, which a single command cannot span, so each stream is
+   * read on its own and the loop polls instead of blocking.
+   */
+  private async read(reader: RedisClient): Promise<StreamReply> {
+    const keys = [...this.cursors.keys()];
+    if (reader instanceof Cluster) {
+      const replies = await Promise.all(
+        keys.map(
+          (key) =>
+            reader.xread(
+              'COUNT',
+              500,
+              'STREAMS',
+              key,
+              this.cursors.get(key) ?? '$',
+            ) as Promise<StreamReply>,
+        ),
+      );
+      const merged = replies.flatMap((r) => r ?? []);
+      if (merged.length === 0) await new Promise((resolve) => setTimeout(resolve, CLUSTER_POLL_MS));
+      return merged;
+    }
+    return (await reader.xread(
+      'COUNT',
+      500,
+      'BLOCK',
+      BLOCK_MS,
+      'STREAMS',
+      ...keys,
+      ...keys.map((key) => this.cursors.get(key) ?? '$'),
+    )) as StreamReply;
+  }
+
+  private async discover(reader: RedisClient): Promise<void> {
     if (Date.now() - this.lastDiscovery < DISCOVERY_INTERVAL) return;
     this.lastDiscovery = Date.now();
 

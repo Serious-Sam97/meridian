@@ -1,13 +1,16 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { Redis, type RedisOptions } from 'ioredis';
+import { type ConnectionOptions, createConnection } from '@meridian/core';
 import { createApi } from './api.js';
 import { EventHub } from './events.js';
 import { sendJson } from './router.js';
 
 export interface DashboardOptions {
-  /** Redis URL, options or client. A client you pass is not closed by close(). */
-  connection?: string | RedisOptions | Redis;
+  /**
+   * Redis URL, options, client, Cluster or `{ cluster: nodes }`. A client you
+   * pass is not closed by close().
+   */
+  connection?: ConnectionOptions;
   prefix?: string;
   /**
    * Decides whether a request may use the dashboard. The dashboard shows job
@@ -74,13 +77,9 @@ function serveAsset(req: IncomingMessage, res: ServerResponse, pathname: string)
 
 export function createDashboard(options: DashboardOptions = {}): Dashboard {
   const prefix = options.prefix ?? 'meridian';
-  const ownsClient = !(options.connection instanceof Redis);
-  const client =
-    options.connection instanceof Redis
-      ? options.connection
-      : typeof options.connection === 'object'
-        ? new Redis({ ...options.connection, maxRetriesPerRequest: null })
-        : new Redis(options.connection ?? 'redis://127.0.0.1:6379', { maxRetriesPerRequest: null });
+  const { client, owned: ownsClient } = createConnection(
+    options.connection ?? 'redis://127.0.0.1:6379',
+  );
 
   const events = new EventHub(client, prefix);
   const api = createApi({ client, prefix, events });

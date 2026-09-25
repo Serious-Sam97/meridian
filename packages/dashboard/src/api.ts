@@ -1,6 +1,6 @@
-import { type Job, type ListableState, Queue } from '@meridian/core';
+import { type Job, type ListableState, Queue, type RedisClient } from '@meridian/core';
 import { Supervisor } from '@meridian/supervisor';
-import type { Redis } from 'ioredis';
+
 import type { EventHub } from './events.js';
 import { HttpError, type RequestContext, Router, readJson } from './router.js';
 
@@ -10,7 +10,7 @@ const MAX_PAGE_SIZE = 100;
 const MAX_CACHED_QUEUES = 1_000;
 
 export interface ApiOptions {
-  client: Redis;
+  client: RedisClient;
   prefix: string;
   events: EventHub;
 }

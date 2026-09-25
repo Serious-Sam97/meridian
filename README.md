@@ -9,6 +9,13 @@ Meridian is built around one rule: **a job is never lost and never in two states
 even when workers are `SIGKILL`ed in the middle of a deploy. Every state transition is one
 atomic Lua script, and the test suite kills real worker processes to prove it.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-dark.png">
+  <img alt="The Meridian dashboard: totals, a throughput chart, three queues with their runtimes, failed jobs, a supervisor with its process pools and a live event feed" src="docs/images/dashboard-light.png">
+</picture>
+
+<sub>The dashboard during <code>npm run demo</code>, while the supervisor scales up the <code>images</code> queue for a burst.</sub>
+
 | Package | Description |
 |---|---|
 | [`@meridian/core`](packages/core) | Queues and workers: priorities, delays, retries with backoff, locks, stalled-job recovery, graceful shutdown, metrics |

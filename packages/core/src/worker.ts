@@ -270,6 +270,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         event === 'completed' ? this.keys.completed : this.keys.failed,
         this.keys.events,
         this.keys.jobPrefix,
+        this.keys.metricsPrefix,
       ],
       [
         job.id,

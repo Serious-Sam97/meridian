@@ -9,6 +9,8 @@ export type ScriptName =
   | 'moveToFinished'
   | 'moveStalledJobs'
   | 'releaseJob'
+  | 'removeJob'
+  | 'retryFailedJob'
   | 'retryJob';
 
 interface LoadedScript {

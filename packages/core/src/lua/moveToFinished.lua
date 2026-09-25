@@ -6,6 +6,7 @@
   KEYS[2] target set (completed or failed)
   KEYS[3] events
   KEYS[4] job key prefix
+  KEYS[5] metrics key prefix
 
   ARGV[1] job id
   ARGV[2] lock token
@@ -33,6 +34,17 @@ if redis.call('ZREM', KEYS[1], jobId) == 0 then
   return -2
 end
 redis.call('DEL', lockKey)
+
+-- Per-minute metrics for the dashboard, kept for 24 hours. Wait time is
+-- measured from creation to the start of the final attempt.
+local times = redis.call('HMGET', jobKey, 'timestamp', 'processedOn')
+local createdAt = tonumber(times[1]) or now
+local startedAt = tonumber(times[2]) or now
+local bucketKey = KEYS[5] .. string.format('%d', math.floor(now / 60000) * 60000)
+redis.call('HINCRBY', bucketKey, ARGV[3], 1)
+redis.call('HINCRBY', bucketKey, 'runtime', now - startedAt)
+redis.call('HINCRBY', bucketKey, 'wait', startedAt - createdAt)
+redis.call('EXPIRE', bucketKey, 86400)
 
 local keep = tonumber(ARGV[7])
 if keep == 0 then

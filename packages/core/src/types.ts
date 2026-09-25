@@ -32,4 +32,16 @@ export type JobState = 'waiting' | 'delayed' | 'active' | 'completed' | 'failed'
 
 export type JobCounts = Record<Exclude<JobState, 'unknown'>, number>;
 
+/** Jobs finished during one minute. */
+export interface MetricsBucket {
+  /** Start of the minute, in ms since the epoch (Redis clock). */
+  timestamp: number;
+  completed: number;
+  failed: number;
+  /** Average processing time of the jobs finished in this minute, in ms. */
+  avgRuntime: number;
+  /** Average time from creation to the start of the final attempt, in ms. */
+  avgWait: number;
+}
+
 export const MAX_PRIORITY = 2 ** 20;

@@ -11,6 +11,8 @@ export interface QueueKeys {
   meta: string;
   events: string;
   stalledCheck: string;
+  /** Prefix for per-minute metric buckets; the bucket start (ms) is appended. */
+  metricsPrefix: string;
   /** Prefix for job hashes; the job id is appended inside Lua scripts. */
   jobPrefix: string;
   job(id: string): string;
@@ -42,6 +44,7 @@ export function queueKeys(queue: string, prefix = 'meridian'): QueueKeys {
     meta: `${base}meta`,
     events: `${base}events`,
     stalledCheck: `${base}stalled-check`,
+    metricsPrefix: `${base}metrics:`,
     jobPrefix,
     job: (id) => `${jobPrefix}${id}`,
     lock: (id) => `${jobPrefix}${id}:lock`,

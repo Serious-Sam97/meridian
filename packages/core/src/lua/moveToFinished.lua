@@ -22,6 +22,7 @@
   -2 when the job is not active.
 ]]
 --@include common
+--@include receipts
 --@include tags
 local now = nowMs()
 
@@ -30,12 +31,17 @@ local jobKey = KEYS[4] .. jobId
 local lockKey = jobKey .. ':lock'
 
 if redis.call('GET', lockKey) ~= ARGV[2] then
+  -- A resend of a call that already succeeded is not a lost lock.
+  if wasSettledBy(jobKey, ARGV[2]) then
+    return 0
+  end
   return -1
 end
 if redis.call('ZREM', KEYS[1], jobId) == 0 then
   return -2
 end
 redis.call('DEL', lockKey)
+markSettled(jobKey, ARGV[2])
 
 -- Per-minute metrics for the dashboard, kept for 24 hours. Wait time is
 -- measured from creation to the start of the final attempt.

@@ -20,6 +20,7 @@
   -2 when the job is not active.
 ]]
 --@include common
+--@include receipts
 local now = nowMs()
 
 local jobId = ARGV[1]
@@ -27,12 +28,17 @@ local jobKey = KEYS[6] .. jobId
 local lockKey = jobKey .. ':lock'
 
 if redis.call('GET', lockKey) ~= ARGV[2] then
+  -- A resend of a call that already succeeded is not a lost lock.
+  if wasSettledBy(jobKey, ARGV[2]) then
+    return 0
+  end
   return -1
 end
 if redis.call('ZREM', KEYS[1], jobId) == 0 then
   return -2
 end
 redis.call('DEL', lockKey)
+markSettled(jobKey, ARGV[2])
 
 redis.call('HINCRBY', jobKey, 'attemptsMade', 1)
 redis.call('HSET', jobKey, 'failedReason', ARGV[4], 'stacktrace', ARGV[5])

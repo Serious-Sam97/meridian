@@ -21,6 +21,14 @@
 --@include common
 local now = nowMs()
 
+-- A resend of a call that already claimed a job returns that job again
+-- instead of claiming a second one, which would sit locked until it stalled.
+local claimKey = KEYS[5] .. 'claim:' .. ARGV[1]
+local claimed = redis.call('GET', claimKey)
+if claimed and redis.call('GET', KEYS[5] .. claimed .. ':lock') == ARGV[1] then
+  return { claimed, redis.call('HGETALL', KEYS[5] .. claimed) }
+end
+
 -- Bounded batch so one call never blocks Redis for long.
 local due = redis.call('ZRANGEBYSCORE', KEYS[3], '-inf', now, 'LIMIT', 0, 1000)
 for _, id in ipairs(due) do
@@ -57,6 +65,7 @@ if rateMax and redis.call('INCR', KEYS[7]) == 1 then
 end
 
 redis.call('SET', jobKey .. ':lock', ARGV[1], 'PX', ARGV[2])
+redis.call('SET', claimKey, jobId, 'PX', ARGV[2])
 redis.call('ZADD', KEYS[2], now, jobId)
 redis.call('HSET', jobKey, 'processedOn', now)
 

@@ -1,69 +1,71 @@
 # Meridian
 
-A Redis-backed job queue for Node.js, with a Horizon-style supervisor and dashboard on the way.
+A Redis-backed job queue for Node.js, with a Laravel Horizon-style **supervisor** that
+scales worker processes by workload and a live **dashboard**.
 
 Meridian is built around one rule: **a job is never lost and never in two states at once**,
-even when workers are `SIGKILL`ed in the middle of a deploy. Every state transition is a
-single atomic Lua script, and the test suite kills real worker processes to prove it.
+even when workers are `SIGKILL`ed in the middle of a deploy. Every state transition is one
+atomic Lua script, and the test suite kills real worker processes to prove it.
 
-## Status
+| Package | Description |
+|---|---|
+| [`@meridian/core`](packages/core) | Queues and workers: priorities, delays, retries with backoff, locks, stalled-job recovery, graceful shutdown, metrics |
+| [`@meridian/supervisor`](packages/supervisor) | Pools of worker processes per queue, balanced by workload (`simple` / `auto`), with a CLI |
+| [`@meridian/dashboard`](packages/dashboard) | Web UI and JSON API: throughput, queues, failed jobs, supervisors, live events |
 
-| Package | Status | Description |
-|---|---|---|
-| [`@meridian/core`](packages/core) | ✅ working | Queues, workers, retries, delayed jobs, stalled-job recovery |
-| `@meridian/supervisor` | 🚧 planned | Worker pools that scale with queue depth (like Laravel Horizon's balancing) |
-| `@meridian/dashboard` | 🚧 planned | Throughput, wait times, failed-job inspection and retry |
+## Try it
+
+```bash
+npm install
+npm run redis:up
+npm run demo        # supervisor + dashboard + a producer sending bursts of work
+```
+
+Open http://127.0.0.1:3000 and watch the supervisor move processes to the queue that
+receives a burst ([demo walkthrough](examples/demo)).
 
 ## Quick look
 
 ```ts
-import { Queue, Worker, UnrecoverableError } from '@meridian/core';
+// producer.ts
+import { Queue } from '@meridian/core';
 
-const emails = new Queue<{ to: string }>('emails', { connection: 'redis://localhost:6379' });
-
-await emails.add(
-  'welcome',
-  { to: 'ada@example.com' },
-  {
-    jobId: 'welcome:ada', // idempotent: adding the same id twice is a no-op
-    attempts: 5,
-    backoff: { type: 'exponential', delay: 1_000, jitter: 0.2 },
-    priority: 1, // lower runs first
-    removeOnComplete: 1_000, // keep the last 1,000 completed jobs
-  },
-);
-
-const worker = new Worker<{ to: string }>(
-  'emails',
-  async (job, signal) => {
-    if (!job.data.to.includes('@')) throw new UnrecoverableError('invalid address');
-    await sendEmail(job.data.to, { signal }); // aborted if this worker loses the job
-    return { sentAt: Date.now() };
-  },
-  { connection: 'redis://localhost:6379', concurrency: 10 },
-);
-
-worker.on('retrying', (job, err, delay) => console.warn(`${job.id} retry in ${delay}ms`, err));
-worker.on('failed', (job, err) => console.error(`${job.id} failed for good`, err));
-
-process.on('SIGTERM', () => worker.close({ timeout: 10_000 }));
+const emails = new Queue<{ to: string }>('emails', { connection: process.env.REDIS_URL });
+await emails.add('welcome', { to: 'ada@example.com' }, {
+  jobId: 'welcome:ada', // idempotent
+  attempts: 5,
+  backoff: { type: 'exponential', delay: 1_000, jitter: 0.2 },
+});
 ```
 
-## Features
+```ts
+// jobs/send-email.ts: one module per queue
+import { UnrecoverableError, type Job } from '@meridian/core';
 
-- **Atomic state transitions**: each move between states is one Lua script ([ADR 0002](docs/adr/0002-redis-data-model.md))
-- **At-least-once delivery** with token locks that are renewed while the job runs ([ADR 0003](docs/adr/0003-delivery-guarantees-and-locks.md))
-- **Stalled-job recovery**: jobs held by a crashed worker go back to the queue, and a job that keeps crashing its worker is failed instead of looping forever
-- **Priorities, delays and retries** with fixed or exponential backoff plus jitter
-- **Instant wake-up**: idle workers block on Redis and pick up new jobs with no polling delay, and they sleep only until the next delayed job is due
-- **Graceful shutdown**: `close({ timeout })` drains running jobs, then hands unfinished ones back to the queue without counting a failed attempt
-- **Pause and resume** per queue
-- **Event stream**: every transition is appended to a capped Redis stream, for the upcoming dashboard
-- A single Redis clock for delays and lock expiry, so clock skew between worker machines does not matter
+export default async function (job: Job<{ to: string }>, signal: AbortSignal) {
+  if (!job.data.to.includes('@')) throw new UnrecoverableError('invalid address');
+  return sendEmail(job.data.to, { signal }); // aborted if this worker loses the job
+}
+```
 
-> **Handlers must be idempotent.** At-least-once means a job can run twice, for example
-> when a worker freezes for longer than `lockDuration`. Use `job.id` as an idempotency key
-> for side effects.
+```js
+// meridian.config.js, then: npx meridian-supervisor
+export default {
+  queues: {
+    emails: { processor: './jobs/send-email.js', concurrency: 10 },
+    images: { processor: './jobs/resize-image.js', concurrency: 2 },
+  },
+  balance: 'auto',
+  maxProcesses: 10,
+};
+```
+
+```bash
+npx meridian-dashboard   # or mount createDashboard().handler in Express
+```
+
+You can also run a `Worker` directly in your own process, without the supervisor. See
+[`@meridian/core`](packages/core).
 
 ## How it works
 
@@ -79,9 +81,63 @@ process.on('SIGTERM', () => worker.close({ timeout: 10_000 }));
                                                         └─ done ─► moveToFinished ─► completed / failed
 ```
 
-Every arrow is one Lua script. A job can only enter `active` together with its lock, so an
-active job without a lock can only mean its worker died. That is how the stalled checker can
-recover jobs safely.
+- **Every arrow is one Lua script.** A job enters `active` together with its lock, so an
+  active job without a lock can only mean its worker died. That is how the stalled checker
+  recovers jobs safely.
+- **At-least-once delivery.** Workers renew their locks while a job runs. A worker that loses
+  one (it froze, or its lock expired) has its handler aborted and its result discarded.
+  **Handlers must be idempotent.**
+- **One clock.** Delays, lock expiry and metrics use Redis' `TIME`, so clock skew between
+  machines does not matter.
+- **No polling.** Idle workers block on Redis and wake the moment a job is added, or exactly
+  when the next delayed job is due.
+- **The supervisor** runs one pool of child processes per queue. Every few seconds it gives
+  each queue a share of `maxProcesses` proportional to its time to clear
+  (`waiting × avg runtime`), capped at what the queue can keep busy, moving by at most
+  `maxShift` per round.
+
+## Benchmarks
+
+Same Redis, same payload, one worker at concurrency 50, no-op jobs
+([method and caveats](bench)):
+
+| Library | Enqueue (jobs/s) | Process (jobs/s) | Latency p50 (ms) | p95 (ms) | p99 (ms) |
+|---|---:|---:|---:|---:|---:|
+| Meridian | 101,832 | 34,687 | 0.45 | 0.92 | 1.71 |
+| BullMQ 6.3 | 59,956 | 35,067 | 0.48 | 0.94 | 1.72 |
+
+<sub>Node 24, Redis 7.4 in Docker, Apple M4 Pro. Run it yourself: `npm run bench`.</sub>
+
+The first run of this benchmark measured Meridian at 6,400 jobs/s. That exposed a worker
+loop in which all concurrency slots shared one fetch round trip. The fix is in
+[`0d28e0e`](../../commit/0d28e0e).
+
+## Testing
+
+```bash
+npm run check   # lint + typecheck + 115 tests against a real Redis
+```
+
+There are no Redis mocks: the Lua scripts are the core of the system, so mocking Redis would
+only test the mocks. Some tests worth reading:
+
+- [SIGKILL a worker process holding jobs](packages/core/test/stalled.test.ts) and assert
+  that another worker completes every one of them
+- [a randomised invariant test](packages/supervisor/test/balancer.test.ts) over 2,000
+  inputs for the balancer. It found a case where a new queue pushed the total over
+  `maxProcesses`.
+- [process pool tests](packages/supervisor/test/pool.test.ts): crash loops with backoff,
+  and a `SIGSTOP`ped child that must be killed
+- [dashboard security](packages/dashboard/test/api.test.ts): CSRF header, `authorize`
+  hook, malformed URLs
+
+## Architecture decisions
+
+- [0001: Record architecture decisions](docs/adr/0001-record-architecture-decisions.md)
+- [0002: Redis data model and atomic state transitions](docs/adr/0002-redis-data-model.md)
+- [0003: At-least-once delivery with token-based locks](docs/adr/0003-delivery-guarantees-and-locks.md)
+- [0004: Supervisor: process pools balanced by workload](docs/adr/0004-supervisor-and-balancing.md)
+- [0005: Dashboard: a framework-free handler with SSE and no build step](docs/adr/0005-dashboard.md)
 
 ## Development
 
@@ -90,17 +146,12 @@ Requires Node 22+ and Docker.
 ```bash
 npm install
 npm run redis:up   # Redis 7 on localhost:6379
-npm run check      # lint + typecheck + tests
+npm run check      # lint, typecheck, tests
+npm run build      # compile all packages to dist/
 ```
 
-The tests run against a real Redis, with no mocks. The Lua scripts are the core of the
-system, so tests that mocked Redis would only test the mocks.
-
-## Architecture decisions
-
-- [0001: Record architecture decisions](docs/adr/0001-record-architecture-decisions.md)
-- [0002: Redis data model and atomic state transitions](docs/adr/0002-redis-data-model.md)
-- [0003: At-least-once delivery with token-based locks](docs/adr/0003-delivery-guarantees-and-locks.md)
+Packages resolve each other's TypeScript sources through a `@meridian/source` export
+condition, so there is no build step between editing `core` and testing `supervisor`.
 
 ## License
 

@@ -9,3 +9,17 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  # Durable Redis for chaos tests that kill and restart the server.
+  redis-durable:
+    image: redis:7.4-alpine
+    container_name: meridian-redis-durable
+    profiles: ["chaos"]
+    ports:
+      - "6390:6379"
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 2s
+      retries: 30

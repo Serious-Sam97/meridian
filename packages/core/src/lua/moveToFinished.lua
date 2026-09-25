@@ -20,8 +20,8 @@
   Returns 0 on success, -1 when the lock is not held by the caller,
   -2 when the job is not active.
 ]]
-local time = redis.call('TIME')
-local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+--@include common
+local now = nowMs()
 
 local jobId = ARGV[1]
 local jobKey = KEYS[4] .. jobId

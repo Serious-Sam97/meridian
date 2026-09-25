@@ -19,8 +19,8 @@
   Returns { jobId, created } where created is 0 when a job with the same
   custom id already exists (adding is idempotent on the id).
 ]]
-local time = redis.call('TIME')
-local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+--@include common
+local now = nowMs()
 
 local jobId = ARGV[1]
 if jobId ~= '' and redis.call('EXISTS', KEYS[6] .. jobId) == 1 then
@@ -55,8 +55,7 @@ else
 end
 
 -- Wake an idle worker. Delayed jobs also wake one so it can shorten its sleep.
-redis.call('LPUSH', KEYS[4], '1')
-redis.call('LTRIM', KEYS[4], 0, 99)
+wakeWorker(KEYS[4])
 
 redis.call('XADD', KEYS[5], 'MAXLEN', '~', ARGV[7], '*', 'event', event, 'jobId', jobId, 'name', ARGV[2])
 

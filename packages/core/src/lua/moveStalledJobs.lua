@@ -18,12 +18,13 @@
 
   Returns { recoveredIds, failedIds }.
 ]]
+--@include common
+
 if not redis.call('SET', KEYS[1], '1', 'PX', ARGV[1], 'NX') then
   return { {}, {} }
 end
 
-local time = redis.call('TIME')
-local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+local now = nowMs()
 local maxStalled = tonumber(ARGV[2])
 
 local recovered = {}
@@ -45,8 +46,7 @@ for _, jobId in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
       redis.call('XADD', KEYS[6], 'MAXLEN', '~', ARGV[3], '*', 'event', 'failed', 'jobId', jobId)
       table.insert(failed, jobId)
     else
-      local fields = redis.call('HMGET', jobKey, 'priority', 'seq')
-      redis.call('ZADD', KEYS[3], tonumber(fields[1]) * 4294967296 + tonumber(fields[2]), jobId)
+      pushWaiting(KEYS[3], jobKey, jobId)
       redis.call('XADD', KEYS[6], 'MAXLEN', '~', ARGV[3], '*', 'event', 'stalled', 'jobId', jobId)
       table.insert(recovered, jobId)
     end
@@ -54,8 +54,7 @@ for _, jobId in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
 end
 
 if #recovered > 0 then
-  redis.call('LPUSH', KEYS[5], '1')
-  redis.call('LTRIM', KEYS[5], 0, 99)
+  wakeWorker(KEYS[5])
 end
 
 return { recovered, failed }

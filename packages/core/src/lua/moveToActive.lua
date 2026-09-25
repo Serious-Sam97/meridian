@@ -17,15 +17,14 @@
   { msUntilNextDelayed }, or { -1 } when nothing is scheduled or the queue
   is paused.
 ]]
-local time = redis.call('TIME')
-local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+--@include common
+local now = nowMs()
 
 -- Bounded batch so one call never blocks Redis for long.
 local due = redis.call('ZRANGEBYSCORE', KEYS[3], '-inf', now, 'LIMIT', 0, 1000)
 for _, id in ipairs(due) do
-  local fields = redis.call('HMGET', KEYS[5] .. id, 'priority', 'seq')
   redis.call('ZREM', KEYS[3], id)
-  redis.call('ZADD', KEYS[1], tonumber(fields[1]) * 4294967296 + tonumber(fields[2]), id)
+  pushWaiting(KEYS[1], KEYS[5] .. id, id)
   redis.call('XADD', KEYS[4], 'MAXLEN', '~', ARGV[3], '*', 'event', 'waiting', 'jobId', id)
 end
 

@@ -13,6 +13,8 @@
 
   Returns 1 when the job was moved, 0 when it is not in the failed set.
 ]]
+--@include common
+
 local jobId = ARGV[1]
 local jobKey = KEYS[5] .. jobId
 
@@ -23,11 +25,8 @@ end
 redis.call('HSET', jobKey, 'attemptsMade', 0)
 redis.call('HDEL', jobKey, 'stalledCount', 'failedReason', 'stacktrace', 'processedOn', 'finishedOn')
 
-local fields = redis.call('HMGET', jobKey, 'priority', 'seq')
-redis.call('ZADD', KEYS[2], tonumber(fields[1]) * 4294967296 + tonumber(fields[2]), jobId)
-
-redis.call('LPUSH', KEYS[3], '1')
-redis.call('LTRIM', KEYS[3], 0, 99)
+pushWaiting(KEYS[2], jobKey, jobId)
+wakeWorker(KEYS[3])
 
 redis.call('XADD', KEYS[4], 'MAXLEN', '~', ARGV[2], '*', 'event', 'waiting', 'jobId', jobId)
 

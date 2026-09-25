@@ -15,6 +15,8 @@
   Returns 0 on success, -1 when the lock is not held by the caller,
   -2 when the job is not active.
 ]]
+--@include common
+
 local jobId = ARGV[1]
 local jobKey = KEYS[5] .. jobId
 local lockKey = jobKey .. ':lock'
@@ -28,11 +30,8 @@ end
 redis.call('DEL', lockKey)
 redis.call('HDEL', jobKey, 'processedOn')
 
-local fields = redis.call('HMGET', jobKey, 'priority', 'seq')
-redis.call('ZADD', KEYS[2], tonumber(fields[1]) * 4294967296 + tonumber(fields[2]), jobId)
-
-redis.call('LPUSH', KEYS[3], '1')
-redis.call('LTRIM', KEYS[3], 0, 99)
+pushWaiting(KEYS[2], jobKey, jobId)
+wakeWorker(KEYS[3])
 
 redis.call('XADD', KEYS[4], 'MAXLEN', '~', ARGV[3], '*', 'event', 'released', 'jobId', jobId)
 

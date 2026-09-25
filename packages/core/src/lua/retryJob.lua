@@ -19,8 +19,8 @@
   Returns 0 on success, -1 when the lock is not held by the caller,
   -2 when the job is not active.
 ]]
-local time = redis.call('TIME')
-local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+--@include common
+local now = nowMs()
 
 local jobId = ARGV[1]
 local jobKey = KEYS[6] .. jobId
@@ -41,12 +41,10 @@ local delay = tonumber(ARGV[3])
 if delay > 0 then
   redis.call('ZADD', KEYS[3], now + delay, jobId)
 else
-  local fields = redis.call('HMGET', jobKey, 'priority', 'seq')
-  redis.call('ZADD', KEYS[2], tonumber(fields[1]) * 4294967296 + tonumber(fields[2]), jobId)
+  pushWaiting(KEYS[2], jobKey, jobId)
 end
 
-redis.call('LPUSH', KEYS[4], '1')
-redis.call('LTRIM', KEYS[4], 0, 99)
+wakeWorker(KEYS[4])
 
 redis.call('XADD', KEYS[5], 'MAXLEN', '~', ARGV[6], '*',
   'event', 'retrying', 'jobId', jobId, 'delay', delay, 'reason', ARGV[4])

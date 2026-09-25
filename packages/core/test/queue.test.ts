@@ -63,6 +63,17 @@ describe('Queue', () => {
     expect(order).toEqual([first.id, second.id, low.id]);
   });
 
+  it('adds jobs in bulk, keeping their order', async () => {
+    const jobs = await queue.addBulk(
+      Array.from({ length: 2_500 }, (_, i) => ({ name: 'send', data: { to: `user${i}` } })),
+    );
+    expect(jobs).toHaveLength(2_500);
+    expect(await queue.getJobCounts()).toMatchObject({ waiting: 2_500 });
+
+    const firstThree = await queue.getJobs('waiting', 0, 2);
+    expect(firstThree.map((j) => j.data.to)).toEqual(['user0', 'user1', 'user2']);
+  });
+
   it('applies default job options', async () => {
     const withDefaults = new Queue(queue.name, {
       connection: redis,

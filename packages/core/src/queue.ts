@@ -76,6 +76,23 @@ export class Queue<Data = unknown> {
     return new Job<Data>(id, name, data, opts, Date.now());
   }
 
+  /**
+   * Adds many jobs with pipelining: all adds of a chunk are written to the
+   * socket without waiting for replies. Each job is added atomically, but
+   * the batch is not: after a failure, earlier jobs of the batch stay added.
+   */
+  async addBulk(
+    jobs: { name: string; data: Data; options?: JobOptions }[],
+    chunkSize = 1_000,
+  ): Promise<Job<Data>[]> {
+    const added: Job<Data>[] = [];
+    for (let i = 0; i < jobs.length; i += chunkSize) {
+      const chunk = jobs.slice(i, i + chunkSize);
+      added.push(...(await Promise.all(chunk.map((j) => this.add(j.name, j.data, j.options)))));
+    }
+    return added;
+  }
+
   async getJob<Result = unknown>(id: string): Promise<Job<Data, Result> | undefined> {
     const hash = await this.client.hgetall(this.keys.job(id));
     return Object.keys(hash).length === 0 ? undefined : Job.fromHash<Data, Result>(id, hash);

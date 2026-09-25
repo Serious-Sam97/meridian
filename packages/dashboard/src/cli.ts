@@ -7,11 +7,12 @@ import { createDashboard } from './dashboard.js';
 const USAGE = `Usage: meridian-dashboard [options]
 
 Options:
-  --port <n>       Port to listen on (default: 3000, or $PORT)
-  --host <host>    Interface to bind (default: 127.0.0.1)
-  --redis <url>    Redis URL (default: $REDIS_URL or redis://127.0.0.1:6379)
-  --prefix <name>  Key prefix of the queues (default: meridian)
-  -h, --help       Show this help
+  --port <n>         Port to listen on (default: 3000, or $PORT)
+  --host <host>      Interface to bind (default: 127.0.0.1)
+  --redis <url>      Redis URL (default: $REDIS_URL or redis://127.0.0.1:6379)
+  --cluster <nodes>  Redis Cluster nodes, e.g. 10.0.0.1:6379,10.0.0.2:6379
+  --prefix <name>    Key prefix of the queues (default: meridian)
+  -h, --help         Show this help
 
 Set MERIDIAN_DASHBOARD_AUTH=user:password to require HTTP Basic auth.
 The dashboard shows job payloads and can delete jobs: protect it before
@@ -22,6 +23,7 @@ const { values } = parseArgs({
     port: { type: 'string' },
     host: { type: 'string', default: '127.0.0.1' },
     redis: { type: 'string' },
+    cluster: { type: 'string' },
     prefix: { type: 'string', default: 'meridian' },
     help: { type: 'boolean', short: 'h' },
   },
@@ -43,8 +45,15 @@ if (!authorized && host !== '127.0.0.1' && host !== 'localhost' && host !== '::1
   );
 }
 
+const cluster = values.cluster?.split(',').map((node) => {
+  const [nodeHost = '127.0.0.1', nodePort = '6379'] = node.trim().split(':');
+  return { host: nodeHost, port: Number(nodePort) };
+});
+
 const dashboard = createDashboard({
-  connection: values.redis ?? process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+  connection: cluster
+    ? { cluster }
+    : (values.redis ?? process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'),
   prefix: values.prefix,
 });
 

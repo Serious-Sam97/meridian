@@ -1,4 +1,6 @@
+import { spawn } from 'node:child_process';
 import type { Server } from 'node:http';
+import { fileURLToPath } from 'node:url';
 import { Queue } from '@meridian/core';
 import { Cluster } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -41,6 +43,45 @@ describe.skipIf(!NODES)('dashboard on Redis Cluster', { timeout: 30_000 }, () =>
     const res = await fetch(`${base}/api/overview`);
     const body = (await res.json()) as { queues: { name: string }[] };
     expect(body.queues.map((q) => q.name).sort()).toEqual(queues.map((q) => q.name).sort());
+  });
+
+  it('serves a cluster from the CLI with --cluster', async () => {
+    const cli = spawn(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        '--conditions=@meridian/source',
+        fileURLToPath(new URL('../../src/cli.ts', import.meta.url)),
+        '--port',
+        '3199',
+        '--prefix',
+        prefix,
+        '--cluster',
+        (NODES ?? []).map((n) => `${n.host}:${n.port}`).join(','),
+      ],
+      { stdio: 'ignore' },
+    );
+    try {
+      let names: string[] = [];
+      await waitFor(
+        async () => {
+          try {
+            const res = await fetch('http://127.0.0.1:3199/api/overview');
+            names = ((await res.json()) as { queues: { name: string }[] }).queues.map(
+              (q) => q.name,
+            );
+            return names.length === queues.length;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15_000, interval: 200 },
+      );
+      expect(names.sort()).toEqual(queues.map((q) => q.name).sort());
+    } finally {
+      cli.kill('SIGTERM');
+    }
   });
 
   it('streams events from queues on different nodes', async () => {

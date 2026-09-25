@@ -13,6 +13,7 @@ npm install @meridian/dashboard
 ```bash
 npx meridian-dashboard --port 3000 --redis redis://localhost:6379
 MERIDIAN_DASHBOARD_AUTH=admin:change-me npx meridian-dashboard --host 0.0.0.0
+npx meridian-dashboard --cluster 10.0.0.1:6379,10.0.0.2:6379,10.0.0.3:6379
 ```
 
 It binds to `127.0.0.1` by default. Set `MERIDIAN_DASHBOARD_AUTH` before exposing it

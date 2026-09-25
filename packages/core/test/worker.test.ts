@@ -213,6 +213,28 @@ describe('Worker', () => {
     expect(seen).toEqual([1, 2]);
   });
 
+  it('does not take jobs while the queue is paused', async () => {
+    await queue.pause();
+    await queue.add('job', { n: 1 });
+    const seen: number[] = [];
+
+    startWorker(
+      async (job) => {
+        seen.push(job.data.n);
+      },
+      { blockTimeout: 10_000 },
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    expect(seen).toEqual([]);
+    expect(await queue.isPaused()).toBe(true);
+
+    // resume() wakes the sleeping worker without waiting for blockTimeout.
+    const resumedAt = Date.now();
+    await queue.resume();
+    await waitFor(() => seen.length === 1, { timeout: 1_000 });
+    expect(Date.now() - resumedAt).toBeLessThan(500);
+  });
+
   it('renews the lock of a job that outlives lockDuration', async () => {
     const job = await queue.add('slow', { n: 1 });
     let done = false;

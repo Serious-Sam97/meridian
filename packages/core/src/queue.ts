@@ -101,6 +101,33 @@ export class Queue<Data = unknown> {
     return { waiting, delayed, active, completed, failed };
   }
 
+  /**
+   * Stops workers from taking new jobs. Jobs already running finish normally,
+   * and jobs can still be added while paused.
+   */
+  async pause(): Promise<void> {
+    await this.client
+      .multi()
+      .hset(this.keys.meta, 'paused', '1')
+      .xadd(this.keys.events, 'MAXLEN', '~', this.maxEvents, '*', 'event', 'paused')
+      .exec();
+  }
+
+  async resume(): Promise<void> {
+    await this.client
+      .multi()
+      .hdel(this.keys.meta, 'paused')
+      // Wake idle workers now instead of on their next poll.
+      .lpush(this.keys.marker, '1')
+      .ltrim(this.keys.marker, 0, 99)
+      .xadd(this.keys.events, 'MAXLEN', '~', this.maxEvents, '*', 'event', 'resumed')
+      .exec();
+  }
+
+  async isPaused(): Promise<boolean> {
+    return (await this.client.hexists(this.keys.meta, 'paused')) === 1;
+  }
+
   /** Deletes every key of this queue. Meant for tests and local development. */
   async obliterate(): Promise<void> {
     let cursor = '0';

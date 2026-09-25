@@ -7,13 +7,15 @@
   KEYS[3] delayed
   KEYS[4] events
   KEYS[5] job key prefix
+  KEYS[6] meta
 
   ARGV[1] lock token
   ARGV[2] lock duration (ms)
   ARGV[3] max events stream length
 
   Returns { jobId, flattened job hash } when a job was taken. Otherwise returns
-  { msUntilNextDelayed }, or { -1 } when nothing is scheduled.
+  { msUntilNextDelayed }, or { -1 } when nothing is scheduled or the queue
+  is paused.
 ]]
 local time = redis.call('TIME')
 local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
@@ -25,6 +27,10 @@ for _, id in ipairs(due) do
   redis.call('ZREM', KEYS[3], id)
   redis.call('ZADD', KEYS[1], tonumber(fields[1]) * 4294967296 + tonumber(fields[2]), id)
   redis.call('XADD', KEYS[4], 'MAXLEN', '~', ARGV[3], '*', 'event', 'waiting', 'jobId', id)
+end
+
+if redis.call('HEXISTS', KEYS[6], 'paused') == 1 then
+  return { -1 }
 end
 
 local popped = redis.call('ZPOPMIN', KEYS[1])

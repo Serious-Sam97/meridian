@@ -157,7 +157,14 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
     const reply = await runScript<[string, string[]] | [number]>(
       this.client,
       'moveToActive',
-      [this.keys.wait, this.keys.active, this.keys.delayed, this.keys.events, this.keys.jobPrefix],
+      [
+        this.keys.wait,
+        this.keys.active,
+        this.keys.delayed,
+        this.keys.events,
+        this.keys.jobPrefix,
+        this.keys.meta,
+      ],
       [token, this.lockDuration, this.maxEvents],
     );
 

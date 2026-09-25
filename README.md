@@ -18,8 +18,8 @@ atomic Lua script, and the test suite kills real worker processes to prove it.
 
 | Package | Description |
 |---|---|
-| [`@meridian/core`](packages/core) | Queues and workers: priorities, delays, retries with backoff, cron and interval schedulers, rate limits, tags, locks, stalled-job recovery, graceful shutdown, metrics |
-| [`@meridian/supervisor`](packages/supervisor) | Pools of worker processes per queue, balanced by workload (`simple` / `auto`), with a CLI |
+| [`@meridian/core`](packages/core) | Queues and workers: priorities, delays, retries with backoff, cron and interval schedulers, rate limits, tags, locks, stalled-job recovery, graceful shutdown, metrics. Runs on Redis Cluster |
+| [`@meridian/supervisor`](packages/supervisor) | Pools of worker processes per queue, balanced by workload (`simple` / `auto`), recycled on memory/job/time limits, with a CLI |
 | [`@meridian/dashboard`](packages/dashboard) | Web UI and JSON API: throughput, queues, failed jobs, tag search, schedulers, supervisors, live events |
 
 ## Try it
@@ -130,7 +130,10 @@ loop in which all concurrency slots shared one fetch round trip. The fix is in
 ## Testing
 
 ```bash
-npm run check   # lint + typecheck + 141 tests against a real Redis
+npm run check          # lint + typecheck + 148 tests against a real Redis
+npm run test:cluster   # the same system on a three-master Redis Cluster
+npm run test:chaos     # SIGKILL Redis mid-run and restart it
+npm run soak -- --minutes 60   # memory and Redis growth over time
 ```
 
 There are no Redis mocks: the Lua scripts are the core of the system, so mocking Redis would
@@ -145,6 +148,15 @@ only test the mocks. Some tests worth reading:
   and a `SIGSTOP`ped child that must be killed
 - [dashboard security](packages/dashboard/test/api.test.ts): CSRF header, `authorize`
   hook, malformed URLs
+- [connection chaos](packages/core/test/connection-chaos.test.ts): the worker's connections
+  are killed every 50 ms while it processes 300 jobs. This found a `close()` that could
+  hang forever, and scripts that were not safe to resend. Both are fixed
+  ([ADR 0007](docs/adr/0007-resilience-and-cluster.md)).
+- [Redis crash](packages/core/test/chaos/redis-restart.test.ts): Redis is SIGKILLed and
+  kept down for 2 s in the middle of processing, and every job still completes exactly
+  once
+- [Redis Cluster](packages/core/test/cluster/cluster.test.ts): queues deliberately placed on
+  different nodes
 
 ## Architecture decisions
 
@@ -154,6 +166,7 @@ only test the mocks. Some tests worth reading:
 - [0004: Supervisor: process pools balanced by workload](docs/adr/0004-supervisor-and-balancing.md)
 - [0005: Dashboard: a framework-free handler with SSE and no build step](docs/adr/0005-dashboard.md)
 - [0006: Job schedulers: each run schedules the next](docs/adr/0006-job-schedulers.md)
+- [0007: Surviving connection drops, Redis crashes and Redis Cluster](docs/adr/0007-resilience-and-cluster.md)
 
 ## Development
 

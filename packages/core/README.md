@@ -31,6 +31,10 @@ await queue.add('welcome', { to: 'ada@example.com' }, {
 await queue.addBulk([{ name: 'welcome', data: { to: 'grace@example.com' } }]);
 ```
 
+`removeOnComplete` / `removeOnFail` counts apply to the queue's whole completed or failed
+set: when a job finishes, the set is trimmed to that job's limit. Use the same limit for all
+jobs of a queue, or the smallest one wins.
+
 | Method | Description |
 |---|---|
 | `add(name, data, options?)` / `addBulk(jobs)` | Add jobs |
@@ -106,6 +110,25 @@ process.on('SIGTERM', () => worker.close({ timeout: 10_000 }));
 | `stalledInterval` | `30000` | How often to look for jobs left behind by dead workers (use the same value on all workers) |
 | `maxStalledCount` | `1` | Stalls allowed before a job is failed instead of recovered |
 | `blockTimeout` | `5000` | Longest idle sleep before polling again |
+
+## Connections, durability and Redis Cluster
+
+`connection` accepts a Redis URL, ioredis options, an ioredis `Redis` or `Cluster` instance,
+or a plain `{ cluster: [{ host, port }, ...] }` object:
+
+```ts
+const queue = new Queue('emails', {
+  connection: { cluster: [{ host: 'redis-1', port: 6379 }, { host: 'redis-2', port: 6379 }] },
+});
+```
+
+Every key of a queue shares one hash slot, so a queue lives on one cluster node. Spread load
+over the cluster with several queues.
+
+Workers survive dropped connections: ioredis reconnects and resends, and the scripts are
+safe to run twice ([ADR 0007](../../docs/adr/0007-resilience-and-cluster.md)). To survive a
+**Redis crash**, turn on persistence: `appendonly yes`. `appendfsync always` loses nothing;
+the default `everysec` can lose the last second of writes.
 
 ### Delivery guarantees
 

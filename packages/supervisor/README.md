@@ -27,8 +27,14 @@ export default defineConfig({
   maxShift: 1,           // processes a queue can gain or lose per round
   balanceInterval: 3000, // ms between rounds
   shutdownTimeout: 10000,
+  // Replace a worker process after 512 MB RSS, 10,000 jobs or 6 hours, like
+  // Horizon's memory/maxJobs. Can also be set per queue.
+  recycle: { maxMemory: 512, maxJobs: 10_000, maxTime: 6 * 3_600_000 },
 });
 ```
+
+`connection` can also be `{ cluster: [{ host, port }, ...] }` for Redis Cluster. It is passed
+to the worker processes, so it must be a plain object.
 
 A config file can also export an array of supervisors, for example one for critical
 queues and one for bulk work, each with its own limits.
@@ -64,7 +70,9 @@ See [ADR 0004](../../docs/adr/0004-supervisor-and-balancing.md) for the details.
 - Queues change by at most `maxShift` per round, and `maxProcesses` is a hard cap.
 
 Worker processes that crash are restarted with exponential backoff, and processes that
-ignore a shutdown are killed after `shutdownTimeout` plus a grace period. Worker processes
+ignore a shutdown are killed after `shutdownTimeout` plus a grace period. Processes that
+cross a `recycle` limit finish or release their jobs and are replaced right away. That is
+logged as a recycle, not a crash, and has no backoff. Worker processes
 exit on their own if the supervisor dies.
 
 The supervisor publishes a heartbeat that [`@meridian/dashboard`](../dashboard) uses to show

@@ -4,7 +4,8 @@
   "type": "module",
   "description": "Throughput and latency benchmarks: Meridian vs BullMQ",
   "scripts": {
-    "bench": "node --import tsx --conditions=@meridian/source run.ts"
+    "bench": "node --import tsx --conditions=@meridian/source run.ts",
+    "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@meridian/core": "0.1.0",

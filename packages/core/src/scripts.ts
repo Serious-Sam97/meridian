@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import type { Redis } from 'ioredis';
+import type { RedisClient } from './connection.js';
 
 export type ScriptName =
   | 'addJob'
@@ -54,7 +54,7 @@ function load(name: ScriptName): LoadedScript {
  * it cached yet (after a restart or SCRIPT FLUSH). EVAL caches it again.
  */
 export async function runScript<T = unknown>(
-  client: Redis,
+  client: RedisClient,
   name: ScriptName,
   keys: string[],
   args: (string | number)[],

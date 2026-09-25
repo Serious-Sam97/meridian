@@ -23,3 +23,28 @@ services:
       interval: 1s
       timeout: 2s
       retries: 30
+
+  # Three-master Redis Cluster in one container: the nodes reach each other on
+  # 127.0.0.1 and announce ports the host can reach, so tests work from outside.
+  redis-cluster:
+    image: redis:7.4-alpine
+    container_name: meridian-redis-cluster
+    profiles: ["cluster"]
+    ports:
+      - "7100-7102:7100-7102"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        for port in 7100 7101 7102; do
+          redis-server --port $$port --cluster-enabled yes --cluster-config-file nodes-$$port.conf \
+            --appendonly no --save '' --daemonize yes
+        done
+        sleep 1
+        redis-cli --cluster create 127.0.0.1:7100 127.0.0.1:7101 127.0.0.1:7102 \
+          --cluster-replicas 0 --cluster-yes
+        exec tail -f /dev/null
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p 7100 cluster info | grep -q cluster_state:ok"]
+      interval: 1s
+      timeout: 2s
+      retries: 30

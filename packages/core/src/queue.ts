@@ -1,5 +1,9 @@
-import type { Redis } from 'ioredis';
-import { type ConnectionOptions, createConnection } from './connection.js';
+import {
+  type ConnectionOptions,
+  createConnection,
+  masterNodes,
+  type RedisClient,
+} from './connection.js';
 import { Job } from './job.js';
 import { type QueueKeys, queueKeys, schedulerScriptKeys } from './keys.js';
 import { nextRun, redisNow, type Schedule, validateSchedule } from './schedule.js';
@@ -45,7 +49,7 @@ export interface QueueOptions {
 
 export class Queue<Data = unknown> {
   readonly keys: QueueKeys;
-  readonly client: Redis;
+  readonly client: RedisClient;
   private readonly ownsClient: boolean;
   private readonly maxEvents: number;
   private readonly defaultJobOptions: JobOptions;
@@ -332,17 +336,20 @@ export class Queue<Data = unknown> {
    * Finds the names of all queues under a prefix. Uses SCAN, so it is meant
    * for dashboards and tooling, not hot paths.
    */
-  static async discover(client: Redis, prefix = 'meridian'): Promise<string[]> {
+  static async discover(client: RedisClient, prefix = 'meridian'): Promise<string[]> {
     const names = new Set<string>();
-    let cursor = '0';
-    do {
-      const [next, keys] = await client.scan(cursor, 'MATCH', `${prefix}:{*}:id`, 'COUNT', 1_000);
-      for (const key of keys) {
-        const match = /^.*?:\{(.+)\}:id$/.exec(key);
-        if (match?.[1]) names.add(match[1]);
-      }
-      cursor = next;
-    } while (cursor !== '0');
+    // SCAN only covers the node it runs on, so scan every master of a cluster.
+    for (const node of await masterNodes(client)) {
+      let cursor = '0';
+      do {
+        const [next, keys] = await node.scan(cursor, 'MATCH', `${prefix}:{*}:id`, 'COUNT', 1_000);
+        for (const key of keys) {
+          const match = /^.*?:\{(.+)\}:id$/.exec(key);
+          if (match?.[1]) names.add(match[1]);
+        }
+        cursor = next;
+      } while (cursor !== '0');
+    }
     return [...names].sort();
   }
 
@@ -409,18 +416,16 @@ export class Queue<Data = unknown> {
 
   /** Deletes every key of this queue. Meant for tests and local development. */
   async obliterate(): Promise<void> {
-    let cursor = '0';
-    do {
-      const [next, keys] = await this.client.scan(
-        cursor,
-        'MATCH',
-        `${this.keys.base}*`,
-        'COUNT',
-        500,
-      );
-      if (keys.length > 0) await this.client.unlink(...keys);
-      cursor = next;
-    } while (cursor !== '0');
+    // All keys of a queue share a hash slot, so they live on one node and can
+    // be unlinked together; that node is found by scanning every master.
+    for (const node of await masterNodes(this.client)) {
+      let cursor = '0';
+      do {
+        const [next, keys] = await node.scan(cursor, 'MATCH', `${this.keys.base}*`, 'COUNT', 500);
+        if (keys.length > 0) await node.unlink(...keys);
+        cursor = next;
+      } while (cursor !== '0');
+    }
   }
 
   async close(): Promise<void> {

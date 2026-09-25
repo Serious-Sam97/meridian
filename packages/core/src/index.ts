@@ -1,5 +1,11 @@
 export { computeBackoff } from './backoff.js';
-export type { ConnectionOptions } from './connection.js';
+export {
+  type ClusterConnection,
+  type ConnectionOptions,
+  createConnection,
+  duplicateConnection,
+  type RedisClient,
+} from './connection.js';
 export { LockLostError, UnrecoverableError, WorkerClosingError } from './errors.js';
 export { Job } from './job.js';
 export { type QueueKeys, queueKeys } from './keys.js';

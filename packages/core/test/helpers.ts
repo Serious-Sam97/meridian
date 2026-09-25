@@ -22,3 +22,9 @@ export async function waitFor(
     await new Promise((resolve) => setTimeout(resolve, interval));
   }
 }
+
+/** Nodes of the test Redis Cluster (`npm run test:cluster`), if any. */
+export const CLUSTER_NODES = process.env.REDIS_CLUSTER_NODES?.split(',').map((node) => {
+  const [host = '127.0.0.1', port = '7100'] = node.split(':');
+  return { host, port: Number(port) };
+});

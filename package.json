@@ -22,7 +22,8 @@
     "redis:down": "docker compose down",
     "bench": "npm run bench -w @meridian/bench --",
     "demo": "npm run build && node examples/demo/start.js",
-    "test:chaos": "docker compose --profile chaos up -d --wait redis-durable && CHAOS_REDIS_URL=redis://127.0.0.1:6390 vitest run packages/core/test/chaos"
+    "test:chaos": "docker compose --profile chaos up -d --wait redis-durable && CHAOS_REDIS_URL=redis://127.0.0.1:6390 vitest run packages/core/test/chaos",
+    "test:cluster": "docker compose --profile cluster up -d --wait redis-cluster && REDIS_CLUSTER_NODES=127.0.0.1:7100,127.0.0.1:7101,127.0.0.1:7102 vitest run packages/*/test/cluster"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import type { Redis } from 'ioredis';
 import { computeBackoff } from './backoff.js';
+import type { RedisClient } from './connection.js';
 import { type ConnectionOptions, createConnection, duplicateConnection } from './connection.js';
 import { LockLostError, UnrecoverableError, WorkerClosingError } from './errors.js';
 import { Job } from './job.js';
@@ -71,9 +71,9 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
   WorkerEvents<Data, Result>
 > {
   readonly keys: QueueKeys;
-  private readonly client: Redis;
+  private readonly client: RedisClient;
   private readonly ownsClient: boolean;
-  private readonly blockingClient: Redis;
+  private readonly blockingClient: RedisClient;
   private readonly concurrency: number;
   private readonly lockDuration: number;
   private readonly blockTimeout: number;

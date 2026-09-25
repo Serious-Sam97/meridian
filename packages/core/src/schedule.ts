@@ -1,5 +1,5 @@
 import { CronExpressionParser } from 'cron-parser';
-import type { Redis } from 'ioredis';
+import type { RedisClient } from './connection.js';
 
 /** When a scheduler runs: every N ms, or on a cron pattern (5 or 6 fields). */
 export type Schedule = { every: number } | { pattern: string; tz?: string };
@@ -35,7 +35,7 @@ export function validateSchedule(schedule: Schedule): void {
 }
 
 /** Current time on the Redis clock, in ms. */
-export async function redisNow(client: Redis): Promise<number> {
+export async function redisNow(client: RedisClient): Promise<number> {
   const [seconds, micros] = await client.time();
   return Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
 }

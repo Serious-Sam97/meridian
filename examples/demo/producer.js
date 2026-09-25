@@ -10,6 +10,7 @@ let n = 0;
 setInterval(async () => {
   n++;
   const to = n % 97 === 0 ? `broken-address-${n}` : `user${n}@example.com`;
+  const customer = `customer:${n % 40}`;
   await emails.add(
     'welcome',
     { to },
@@ -17,6 +18,7 @@ setInterval(async () => {
       attempts: 3,
       backoff: { type: 'exponential', delay: 1_000, jitter: 0.3 },
       removeOnComplete: 5_000,
+      tags: [customer, 'welcome'],
     },
   );
 }, 100);
@@ -34,12 +36,14 @@ async function burst() {
 void burst();
 setInterval(burst, 30_000);
 
-setInterval(() => {
-  void reports.add(
-    'weekly-digest',
-    { team: ['growth', 'infra', 'billing'][n % 3] },
-    { delay: 5_000 },
-  );
-}, 15_000);
+// Every 20 seconds, like a cron job. Upserting on every start is a no-op.
+await reports.upsertScheduler(
+  'team-digest',
+  { pattern: '*/20 * * * * *' },
+  { name: 'weekly-digest', data: { team: 'growth' }, options: { tags: ['reports'] } },
+);
+
+// The email provider allows 600 messages a minute; every worker respects it.
+await emails.setRateLimit({ max: 600, duration: 60_000 });
 
 console.log('producer: adding jobs to emails, images and reports');

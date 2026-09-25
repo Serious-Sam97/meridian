@@ -2,10 +2,10 @@
 
 A supervisor, the dashboard and a producer that generates realistic traffic:
 
-- **emails**: a steady 10 jobs/s, with occasional transient SMTP errors (retried with
+- **emails**: a steady 10 jobs/s, tagged by customer and capped by a 600/min rate limit, with occasional transient SMTP errors (retried with
   exponential backoff) and invalid addresses (`UnrecoverableError`, failed immediately)
 - **images**: a burst of 150 slow jobs every 30 seconds
-- **reports**: a slow delayed job every 15 seconds
+- **reports**: a slow job every 20 seconds from a cron scheduler (`*/20 * * * * *`)
 
 ```bash
 npm run redis:up

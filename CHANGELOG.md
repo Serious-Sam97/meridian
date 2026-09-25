@@ -4,7 +4,7 @@ All packages are versioned together. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-09-24
+## [0.1.0] - 2026-09-25
 
 First release.
 
@@ -34,3 +34,5 @@ First release.
   supervisors, and a live event feed over SSE
 - An `authorize` hook, CSRF header check, strict CSP, and the `meridian-dashboard` CLI
   with Basic auth
+
+[0.1.0]: https://github.com/Serious-Sam97/meridian/releases/tag/v0.1.0

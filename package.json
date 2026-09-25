@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "lint": "biome check .",
     "format": "biome format --write .",
+    "check": "npm run lint && npm run typecheck && npm test",
     "redis:up": "docker compose up -d redis",
     "redis:down": "docker compose down"
   },

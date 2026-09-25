@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Redis, type RedisOptions } from 'ioredis';
 import { createApi } from './api.js';
+import { EventHub } from './events.js';
 import { sendJson } from './router.js';
 
 export interface DashboardOptions {
@@ -32,7 +33,8 @@ export function createDashboard(options: DashboardOptions = {}): Dashboard {
         ? new Redis({ ...options.connection, maxRetriesPerRequest: null })
         : new Redis(options.connection ?? 'redis://127.0.0.1:6379', { maxRetriesPerRequest: null });
 
-  const api = createApi({ client, prefix });
+  const events = new EventHub(client, prefix);
+  const api = createApi({ client, prefix, events });
 
   async function handler(req: IncomingMessage, res: ServerResponse, next?: () => void) {
     // Express strips its mount path from req.url, so routes are always relative.
@@ -59,6 +61,7 @@ export function createDashboard(options: DashboardOptions = {}): Dashboard {
   return {
     handler,
     async close() {
+      await events.close();
       if (ownsClient) await client.quit();
     },
   };

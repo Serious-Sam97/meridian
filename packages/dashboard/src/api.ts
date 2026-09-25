@@ -1,6 +1,7 @@
 import { type Job, type ListableState, Queue } from '@meridian/core';
 import { Supervisor } from '@meridian/supervisor';
 import type { Redis } from 'ioredis';
+import type { EventHub } from './events.js';
 import { HttpError, type RequestContext, Router } from './router.js';
 
 const STATES: ListableState[] = ['waiting', 'delayed', 'active', 'completed', 'failed'];
@@ -9,12 +10,13 @@ const MAX_PAGE_SIZE = 100;
 export interface ApiOptions {
   client: Redis;
   prefix: string;
+  events: EventHub;
 }
 
 /** Summary of a queue over the last `SUMMARY_MINUTES` minutes. */
 const SUMMARY_MINUTES = 5;
 
-export function createApi({ client, prefix }: ApiOptions): Router {
+export function createApi({ client, prefix, events }: ApiOptions): Router {
   const queues = new Map<string, Queue>();
 
   function queue(name: string): Queue {
@@ -102,6 +104,10 @@ export function createApi({ client, prefix }: ApiOptions): Router {
       }
       totals.jobsPerMinute = Math.round(totals.jobsPerMinute * 10) / 10;
       return { queues: summaries, supervisors, totals };
+    })
+
+    .on('GET', '/api/events', ({ res }) => {
+      events.subscribe(res);
     })
 
     .on('GET', '/api/metrics', async ({ query }) => {

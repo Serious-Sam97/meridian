@@ -46,4 +46,10 @@ export interface MetricsBucket {
   avgWait: number;
 }
 
+/** At most `max` jobs start per `duration` ms, across all workers of a queue. */
+export interface RateLimit {
+  max: number;
+  duration: number;
+}
+
 export const MAX_PRIORITY = 2 ** 20;

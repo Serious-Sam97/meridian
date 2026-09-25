@@ -205,6 +205,7 @@ export class Worker<Data = unknown, Result = unknown> extends EventEmitter<
         this.keys.events,
         this.keys.jobPrefix,
         this.keys.meta,
+        this.keys.limiter,
       ],
       [token, this.lockDuration, this.maxEvents],
     );

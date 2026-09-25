@@ -11,6 +11,8 @@ export interface QueueKeys {
   meta: string;
   events: string;
   stalledCheck: string;
+  /** Counter for the current rate limit window. */
+  limiter: string;
   /** Prefix for per-minute metric buckets; the bucket start (ms) is appended. */
   metricsPrefix: string;
   /** Sorted set of scheduler ids by next run time (ADR 0006). */
@@ -61,6 +63,7 @@ export function queueKeys(queue: string, prefix = 'meridian'): QueueKeys {
     meta: `${base}meta`,
     events: `${base}events`,
     stalledCheck: `${base}stalled-check`,
+    limiter: `${base}limiter`,
     metricsPrefix: `${base}metrics:`,
     schedulers: `${base}schedulers`,
     scheduler: (id) => `${base}scheduler:${id}`,

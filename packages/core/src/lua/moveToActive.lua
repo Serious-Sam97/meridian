@@ -8,14 +8,15 @@
   KEYS[4] events
   KEYS[5] job key prefix
   KEYS[6] meta
+  KEYS[7] rate limiter counter
 
   ARGV[1] lock token
   ARGV[2] lock duration (ms)
   ARGV[3] max events stream length
 
   Returns { jobId, flattened job hash } when a job was taken. Otherwise returns
-  { msUntilNextDelayed }, or { -1 } when nothing is scheduled or the queue
-  is paused.
+  { msToWait }: until the next delayed job, or until the rate limit window
+  resets; { -1 } when nothing is scheduled or the queue is paused.
 ]]
 --@include common
 local now = nowMs()
@@ -32,6 +33,13 @@ if redis.call('HEXISTS', KEYS[6], 'paused') == 1 then
   return { -1 }
 end
 
+-- Fixed-window rate limit shared by every worker of the queue.
+local limit = redis.call('HMGET', KEYS[6], 'rateMax', 'rateDuration')
+local rateMax = tonumber(limit[1])
+if rateMax and tonumber(redis.call('GET', KEYS[7]) or '0') >= rateMax then
+  return { math.max(redis.call('PTTL', KEYS[7]), 1) }
+end
+
 local popped = redis.call('ZPOPMIN', KEYS[1])
 if #popped == 0 then
   local nextDelayed = redis.call('ZRANGE', KEYS[3], 0, 0, 'WITHSCORES')
@@ -43,6 +51,10 @@ end
 
 local jobId = popped[1]
 local jobKey = KEYS[5] .. jobId
+
+if rateMax and redis.call('INCR', KEYS[7]) == 1 then
+  redis.call('PEXPIRE', KEYS[7], limit[2])
+end
 
 redis.call('SET', jobKey .. ':lock', ARGV[1], 'PX', ARGV[2])
 redis.call('ZADD', KEYS[2], now, jobId)

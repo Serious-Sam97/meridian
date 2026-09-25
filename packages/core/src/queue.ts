@@ -10,6 +10,7 @@ import {
   type JobState,
   MAX_PRIORITY,
   type MetricsBucket,
+  type RateLimit,
 } from './types.js';
 
 export type ListableState = Exclude<JobState, 'unknown'>;
@@ -350,6 +351,29 @@ export class Queue<Data = unknown> {
       .ltrim(this.keys.marker, 0, 99)
       .xadd(this.keys.events, 'MAXLEN', '~', this.maxEvents, '*', 'event', 'resumed')
       .exec();
+  }
+
+  /**
+   * Limits how many jobs start per time window, across all workers. The limit
+   * lives in Redis, so it applies to running workers immediately. Pass null
+   * to remove it.
+   */
+  async setRateLimit(limit: RateLimit | null): Promise<void> {
+    if (limit === null) {
+      await this.client.hdel(this.keys.meta, 'rateMax', 'rateDuration');
+      await this.client.lpush(this.keys.marker, '1');
+      return;
+    }
+    const { max, duration } = limit;
+    if (!Number.isInteger(max) || max < 1 || !Number.isInteger(duration) || duration < 1) {
+      throw new RangeError('rate limit max and duration must be positive integers');
+    }
+    await this.client.hset(this.keys.meta, 'rateMax', max, 'rateDuration', duration);
+  }
+
+  async getRateLimit(): Promise<RateLimit | null> {
+    const [max, duration] = await this.client.hmget(this.keys.meta, 'rateMax', 'rateDuration');
+    return max && duration ? { max: Number(max), duration: Number(duration) } : null;
   }
 
   async isPaused(): Promise<boolean> {

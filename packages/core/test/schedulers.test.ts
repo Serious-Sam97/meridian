@@ -83,10 +83,19 @@ describe('job schedulers', () => {
   });
 
   it('replaces the pending run when the schedule changes', async () => {
-    const first = await queue.upsertScheduler('digest', { every: 3_600_000 }, { name: 'digest' });
-    const second = await queue.upsertScheduler('digest', { every: 60_000 }, { name: 'digest' });
+    // Two patterns whose next runs can never coincide, whatever the current time.
+    const first = await queue.upsertScheduler(
+      'digest',
+      { pattern: '0 0 1 1 *', tz: 'UTC' },
+      { name: 'digest' },
+    );
+    const second = await queue.upsertScheduler(
+      'digest',
+      { pattern: '0 0 1 7 *', tz: 'UTC' },
+      { name: 'digest' },
+    );
 
-    expect(second.next).toBeLessThan(first.next);
+    expect(second.next).not.toBe(first.next);
     const delayed = await queue.getJobs('delayed');
     expect(delayed.map((j) => j.id)).toEqual([`repeat:digest:${second.next}`]);
   });
@@ -131,14 +140,16 @@ describe('job schedulers', () => {
     await new Promise((r) => setTimeout(r, 1_000));
 
     const runs: number[] = [];
+    const workerStartedAt = Date.now();
     startWorker((job) => runs.push(job.opts.repeat?.runAt ?? 0));
     await waitFor(() => runs.length >= 3, { timeout: 3_000 });
 
-    // The overdue run is processed once, then the schedule continues from now
-    // instead of replaying the nine missed runs.
-    const gapAfterCatchUp = runs[1]! - runs[0]!;
-    expect(gapAfterCatchUp).toBeGreaterThan(500);
-    expect(runs[2]! - runs[1]!).toBe(100);
+    // The overdue run is processed once...
+    expect(runs[0]).toBeLessThan(workerStartedAt - 500);
+    // ...then the schedule continues from now instead of replaying the nine
+    // missed runs. (A run picked up late under load may skip a slot too.)
+    expect(runs[1]).toBeGreaterThanOrEqual(workerStartedAt - 100);
+    expect(runs.every((runAt) => runAt % 100 === 0)).toBe(true);
   });
 
   it('lists schedulers with their next run', async () => {

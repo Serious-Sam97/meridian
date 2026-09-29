@@ -10,6 +10,19 @@ services:
       timeout: 2s
       retries: 15
 
+  # The dashboard for the queues in `redis`. The port is published on
+  # localhost only: set MERIDIAN_DASHBOARD_AUTH=user:password before exposing it.
+  dashboard:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_URL: redis://redis:6379
+      MERIDIAN_DASHBOARD_AUTH: ${MERIDIAN_DASHBOARD_AUTH:-}
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-3000}:3000"
+
   # Durable Redis for chaos tests that kill and restart the server.
   redis-durable:
     image: redis:7.4-alpine

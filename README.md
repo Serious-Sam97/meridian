@@ -77,6 +77,7 @@ export default {
 
 ```bash
 npx meridian-dashboard   # or mount createDashboard().handler in Express
+docker compose up -d     # or run it in Docker, next to the redis service
 ```
 
 You can also run a `Worker` directly in your own process, without the supervisor. See
